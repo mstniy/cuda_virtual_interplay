@@ -9,6 +9,14 @@
 
 using namespace std;
 
+template<typename T>
+class device_copyable
+{
+public:
+	virtual void copyToDevice(T** pos) = 0;
+	virtual ~device_copyable() = default;
+};
+
 class Base
 {
 public:
@@ -17,20 +25,7 @@ public:
 	__host__ __device__ Base(int _b_id):b_id(_b_id){}
 	__host__ __device__ Base(const Base& b):b_id(b.b_id){}
 	virtual ~Base() = default;
-};
-
-class BaseDevice;
-
-class BaseHost
-{
-public:
-	virtual void createOnDevice(BaseDevice** pos) = 0;
-};
-
-class BaseDevice
-{
-public:
-	__device__ virtual void f() = 0;
+	__device__ virtual void f(){};
 };
 
 class Sub1 : public Base
@@ -40,59 +35,51 @@ public:
 public:
 	__host__ __device__ Sub1(int _b_id, int _sub_id):Base(_b_id), sub_id(_sub_id){}
 	__host__ __device__ Sub1(const Sub1& s):Base(s), sub_id(s.sub_id){}
-};
-
-class Sub1Host : public BaseHost, public Sub1
-{
-public:
-	using Sub1::Sub1;
-	void createOnDevice(BaseDevice** pos) override;
-};
-
-class Sub1Device : public BaseDevice, public Sub1
-{
-public:
-	using Sub1::Sub1;
-	__device__ Sub1Device(const Sub1& h):Sub1(h){}
-public:
 	__device__ void f() override
 	{
 		printf("hello 1: %d %d!\n", b_id, sub_id);
 	}
 };
 
-__global__ void create_sub1(BaseDevice** object, Sub1Host h)
+class Sub1Host : public Sub1, public device_copyable<Base>
 {
-	*object = new Sub1Device(h);
+public:
+	using Sub1::Sub1;
+	void copyToDevice(Base** pos) override;
+};
+
+__global__ void create_sub1(Base** object, Sub1Host h)
+{
+	*object = new Sub1(h);
 }
 
-void Sub1Host::createOnDevice(BaseDevice** pos)
+void Sub1Host::copyToDevice(Base** pos)
 {
 	create_sub1<<<1,1>>>(pos, *this);
 }
 
-__global__ void runner(BaseDevice** objects, int len)
+__global__ void runner(Base** objects, int len)
 {
 	for (int i=0; i<len; i++)
 		objects[i]->f();
 }
 
-void run(std::vector<std::unique_ptr<BaseHost>> objs)
+void run(std::vector<std::unique_ptr<device_copyable<Base>>> objs)
 {
-	BaseDevice** d_objects;
-	CUDA_CALL(cudaMalloc((void **)&d_objects, objs.size() * sizeof(BaseDevice*)));
+	Base** d_objects;
+	CUDA_CALL(cudaMalloc((void **)&d_objects, objs.size() * sizeof(Base*)));
 	for (int i=0; i<objs.size(); i++)
 	{
-		objs[i]->createOnDevice(&d_objects[i]);
+		objs[i]->copyToDevice(&d_objects[i]);
 	}
 	runner<<<1,1>>>(d_objects, objs.size());
 }
 
 int main()
 {
-	std::vector<std::unique_ptr<BaseHost>> funcs;
-	funcs.push_back(std::unique_ptr<BaseHost>(new Sub1Host(42, 68)));
-	run(std::move(funcs));
+	std::vector<std::unique_ptr<device_copyable<Base>>> objs;
+	objs.push_back(std::unique_ptr<device_copyable<Base>>(new Sub1Host(42, 68)));
+	run(std::move(objs));
 	cudaDeviceSynchronize();
 	return 0;
 }
