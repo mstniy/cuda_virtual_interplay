@@ -9,11 +9,11 @@
 
 using namespace std;
 
-template<typename T>
+template<typename Base>
 class device_copyable
 {
 public:
-	virtual void copyToDevice(T** pos) = 0;
+	virtual void copyToDevice(Base** pos) = 0;
 	virtual ~device_copyable() = default;
 };
 
@@ -23,7 +23,17 @@ __global__ void copy_to_device(Base** object, Derived h)
 	*object = new Derived(h);
 }
 
-class Base : public device_copyable<Base>
+template<typename Base, typename Derived>
+class implements_device_copyable : virtual public device_copyable<Base>
+{
+public:
+	void copyToDevice(Base** pos) override
+	{
+		copy_to_device<Base, Derived><<<1,1>>>(pos, dynamic_cast<Derived&>(*this));
+	}
+};
+
+class Base : public virtual device_copyable<Base>
 {
 public:
 	int b_id;
@@ -34,7 +44,7 @@ public:
 	__device__ virtual void f(){};
 };
 
-class Sub1 : public Base
+class Sub1 : public Base, public implements_device_copyable<Base, Sub1>
 {
 public:
 	int sub_id;
@@ -45,10 +55,6 @@ public:
 	{
 		printf("hello 1: %d %d!\n", b_id, sub_id);
 	}
-	void copyToDevice(Base** pos) override
-	{
-		copy_to_device<Base, Sub1><<<1,1>>>(pos, *this);
-	}
 };
 
 __global__ void runner(Base** objects, int len)
@@ -57,7 +63,7 @@ __global__ void runner(Base** objects, int len)
 		objects[i]->f();
 }
 
-void run(std::vector<std::unique_ptr<device_copyable<Base>>> objs)
+void run(std::vector<std::unique_ptr<Base>> objs)
 {
 	Base** d_objects;
 	CUDA_CALL(cudaMalloc((void **)&d_objects, objs.size() * sizeof(Base*)));
@@ -70,8 +76,8 @@ void run(std::vector<std::unique_ptr<device_copyable<Base>>> objs)
 
 int main()
 {
-	std::vector<std::unique_ptr<device_copyable<Base>>> objs;
-	objs.push_back(std::unique_ptr<device_copyable<Base>>(new Sub1(42, 68)));
+	std::vector<std::unique_ptr<Base>> objs;
+	objs.push_back(std::unique_ptr<Base>(new Sub1(42, 68)));
 	run(std::move(objs));
 	cudaDeviceSynchronize();
 	return 0;
