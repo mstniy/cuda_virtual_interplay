@@ -17,7 +17,13 @@ public:
 	virtual ~device_copyable() = default;
 };
 
-class Base
+template<typename Base, typename Derived>
+__global__ void copy_to_device(Base** object, Derived h)
+{
+	*object = new Derived(h);
+}
+
+class Base : public device_copyable<Base>
 {
 public:
 	int b_id;
@@ -39,24 +45,11 @@ public:
 	{
 		printf("hello 1: %d %d!\n", b_id, sub_id);
 	}
+	void copyToDevice(Base** pos) override
+	{
+		copy_to_device<Base, Sub1><<<1,1>>>(pos, *this);
+	}
 };
-
-class Sub1Host : public Sub1, public device_copyable<Base>
-{
-public:
-	using Sub1::Sub1;
-	void copyToDevice(Base** pos) override;
-};
-
-__global__ void create_sub1(Base** object, Sub1Host h)
-{
-	*object = new Sub1(h);
-}
-
-void Sub1Host::copyToDevice(Base** pos)
-{
-	create_sub1<<<1,1>>>(pos, *this);
-}
 
 __global__ void runner(Base** objects, int len)
 {
@@ -78,7 +71,7 @@ void run(std::vector<std::unique_ptr<device_copyable<Base>>> objs)
 int main()
 {
 	std::vector<std::unique_ptr<device_copyable<Base>>> objs;
-	objs.push_back(std::unique_ptr<device_copyable<Base>>(new Sub1Host(42, 68)));
+	objs.push_back(std::unique_ptr<device_copyable<Base>>(new Sub1(42, 68)));
 	run(std::move(objs));
 	cudaDeviceSynchronize();
 	return 0;
