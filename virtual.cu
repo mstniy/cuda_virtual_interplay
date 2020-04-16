@@ -41,7 +41,7 @@ public:
 	__host__ __device__ Base(int _b_id):b_id(_b_id){}
 	__host__ __device__ Base(const Base& b):b_id(b.b_id){}
 	virtual ~Base() = default;
-	__device__ virtual void f(){};
+	__device__ virtual void f() = 0;
 };
 
 class Sub1 : public Base, public implements_device_copyable<Base, Sub1>
