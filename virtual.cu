@@ -57,6 +57,19 @@ public:
 	}
 };
 
+class Sub2 : public Base, public implements_device_copyable<Base, Sub2>
+{
+public:
+	char sub_ch;
+public:
+	__host__ __device__ Sub2(int _b_id, char _sub_ch):Base(_b_id), sub_ch(_sub_ch){}
+	__host__ __device__ Sub2(const Sub2& s):Base(s), sub_ch(s.sub_ch){}
+	__device__ void f() override
+	{
+		printf("hello 2: %d %c!\n", b_id, sub_ch);
+	}
+};
+
 __global__ void runner(Base** objects, int len)
 {
 	for (int i=0; i<len; i++)
@@ -77,7 +90,8 @@ void run(std::vector<std::unique_ptr<Base>> objs)
 int main()
 {
 	std::vector<std::unique_ptr<Base>> objs;
-	objs.push_back(std::unique_ptr<Base>(new Sub1(42, 68)));
+	objs.push_back(std::unique_ptr<Base>(new Sub1(1, 2)));
+	objs.push_back(std::unique_ptr<Base>(new Sub2(3, 'd')));
 	run(std::move(objs));
 	cudaDeviceSynchronize();
 	return 0;
