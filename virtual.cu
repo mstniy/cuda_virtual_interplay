@@ -13,22 +13,19 @@ class Base
 {
 public:
 	int b_id;
-	__host__ __device__ Base() = default;
+public:
+	Base() = default;
 	__host__ __device__ Base(int _b_id):b_id(_b_id){}
+	virtual ~Base() = default;
 };
 
 class BaseHost : public virtual Base
 {
-public:
-	BaseHost() = default;
-	virtual ~BaseHost() = default;
 };
 
 class BaseDevice : public virtual Base
 {
 public:
-	__device__ BaseDevice() = default;
-	__device__ virtual ~BaseDevice() = default;
 	__device__ virtual void f() = 0;
 };
 
@@ -36,6 +33,7 @@ class Sub1 : public virtual Base
 {
 public:
 	int sub_id;
+public:
 	__host__ __device__ Sub1(int _sub_id):sub_id(_sub_id){}
 };
 
@@ -43,14 +41,12 @@ class Sub1Host : public BaseHost, public Sub1
 {
 public:
 	Sub1Host(int _b_id, int _sub_id):Base(_b_id), Sub1(_sub_id){}
-	virtual ~Sub1Host() = default;
 };
 
 class Sub1Device : public BaseDevice, public Sub1
 {
 public:
 	__device__ Sub1Device(int _b_id, int _sub_id):Base(_b_id), Sub1(_sub_id){}
-	__device__ virtual ~Sub1Device() = default;
 public:
 	__device__ void f() override
 	{
