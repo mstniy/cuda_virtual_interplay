@@ -21,41 +21,39 @@ public:
 
 class BaseDevice;
 
-class BaseHost : public Base
+class BaseHost
 {
 public:
-	using Base::Base;
 	virtual void createOnDevice(BaseDevice** pos) = 0;
 };
 
-class BaseDevice : public Base
+class BaseDevice
 {
 public:
-	using Base::Base;
-	__device__ BaseDevice(const Base& b):Base(b){}
 	__device__ virtual void f() = 0;
 };
 
-class Sub1 // : public Base
+class Sub1 : public Base
 {
 public:
 	int sub_id;
 public:
-	__host__ __device__ Sub1(int _sub_id):sub_id(_sub_id){}
+	__host__ __device__ Sub1(int _b_id, int _sub_id):Base(_b_id), sub_id(_sub_id){}
+	__host__ __device__ Sub1(const Sub1& s):Base(s), sub_id(s.sub_id){}
 };
 
 class Sub1Host : public BaseHost, public Sub1
 {
 public:
-	Sub1Host(int _b_id, int _sub_id):BaseHost(_b_id), Sub1(_sub_id){}
+	using Sub1::Sub1;
 	void createOnDevice(BaseDevice** pos) override;
 };
 
 class Sub1Device : public BaseDevice, public Sub1
 {
 public:
-	__device__ Sub1Device(int _b_id, int _sub_id):BaseDevice(_b_id), Sub1(_sub_id){}
-	__device__ Sub1Device(const Sub1Host& h):BaseDevice(h), Sub1(h){}
+	using Sub1::Sub1;
+	__device__ Sub1Device(const Sub1& h):Sub1(h){}
 public:
 	__device__ void f() override
 	{
