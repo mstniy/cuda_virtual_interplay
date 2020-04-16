@@ -4,6 +4,7 @@
 #include <iostream>
 #include <typeindex>
 #include <unordered_map>
+#include <utility>
 
 #define CUDA_CALL(x) do { if((x) != cudaSuccess) { \
     printf("Error at %s:%d\n",__FILE__,__LINE__); \
@@ -16,19 +17,19 @@ class device_copyable
 {
 public:
 	virtual size_t getMostDerivedSize() const = 0;
-	virtual Base* placementNew(void* ptr) const = 0;
+	virtual std::pair<Base*, void*> placementNew(void* ptr) const = 0;
 	virtual void resusciate(void** pos, int len) = 0;
 	virtual ~device_copyable() = default;
 };
 
-template<typename Derived>
+template<typename Base, typename Derived>
 __global__ void resuscitate_kernel(Derived** objects, int len)
 {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	int thread_count = gridDim.x * blockDim.x;
 	for (int i=tid; i<len; i += thread_count)
 	{
-		Derived s(*static_cast<Derived*>(objects[i]));
+		Derived s(*objects[i]);
 		new (objects[i]) Derived(s);
 	}
 }
@@ -41,18 +42,18 @@ public:
 	{
 		return sizeof(Derived);
 	}
-	Base* placementNew(void* ptr) const override
+	std::pair<Base*, void*> placementNew(void* ptr) const override
 	{
 		new (ptr) Derived(static_cast<const Derived&>(*this));
 		Derived* dp = reinterpret_cast<Derived*>(ptr);
-		return static_cast<Base*>(dp);
+		return std::make_pair(static_cast<Base*>(dp), (void*)dp);
 	}
 	void resusciate(void** pos, int len) override
 	{
 		const int TB_SIZE = 128;
 		const int THREAD_COUNT = 16384;
 		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
-		resuscitate_kernel<Derived><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len);
+		resuscitate_kernel<Base, Derived><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len);
 		//cudaDeviceSynchronize();
 	}
 };
@@ -115,9 +116,11 @@ void run(std::vector<std::unique_ptr<Base>> objs)
 		groups[typeid(*obj)].push_back(std::move(obj));
 	}
 	// Allocate memory to store pointers to the objects
-	Base** d_objects;
+	void** d_objects_derived;
+	Base** d_objects_base;
 	int d_objects_index=0;
-	CUDA_CALL(cudaMallocManaged((void **)&d_objects, objs.size() * sizeof(Base*)));
+	CUDA_CALL(cudaMallocManaged((void **)&d_objects_derived, objs.size() * sizeof(void*)));
+	CUDA_CALL(cudaMallocManaged((void **)&d_objects_base, objs.size() * sizeof(Base*)));
 	// Allocate memory to store the objects
 	char* object_buffer;
 	CUDA_CALL(cudaMallocManaged((void **)&object_buffer, totalSize));
@@ -126,7 +129,9 @@ void run(std::vector<std::unique_ptr<Base>> objs)
 	{
 		for (const auto& obj : pr.second)
 		{
-			d_objects[d_objects_index++] = obj->placementNew(object_buffer + currentSize);
+			auto ptrp = obj->placementNew(object_buffer + currentSize);
+			d_objects_base[d_objects_index] = ptrp.first;
+			d_objects_derived[d_objects_index++] = ptrp.second;
 			currentSize += obj->getMostDerivedSize();
 		}
 	}
@@ -137,11 +142,16 @@ void run(std::vector<std::unique_ptr<Base>> objs)
 	d_objects_index = 0;
 	for (const auto& pr : groups)
 	{
-		pr.second[0]->resusciate((void**)&d_objects[d_objects_index], pr.second.size());
+		pr.second[0]->resusciate(&d_objects_derived[d_objects_index], pr.second.size());
 		d_objects_index += pr.second.size();
 	}
+	// Free the array that holds derived pointers. We don't need them after resuscitation (since we need the Base*s to run virtual methods).
+	cudaFree((void*)d_objects_derived);
 	// Run the demo to make sure everything works.
-	runner<<<1,1>>>(d_objects, objs.size());
+	runner<<<1,1>>>(d_objects_base, objs.size());
+	// Free all memory
+	cudaFree((void*)d_objects_base);
+	cudaFree((void*)object_buffer);
 }
 
 int main()
