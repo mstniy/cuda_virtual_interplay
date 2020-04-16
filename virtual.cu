@@ -19,8 +19,12 @@ public:
 	virtual ~Base() = default;
 };
 
+class BaseDevice;
+
 class BaseHost : public virtual Base
 {
+public:
+	virtual void createOnDevice(BaseDevice** pos) = 0;
 };
 
 class BaseDevice : public virtual Base
@@ -41,6 +45,7 @@ class Sub1Host : public BaseHost, public Sub1
 {
 public:
 	Sub1Host(int _b_id, int _sub_id):Base(_b_id), Sub1(_sub_id){}
+	void createOnDevice(BaseDevice** pos) override;
 };
 
 class Sub1Device : public BaseDevice, public Sub1
@@ -54,34 +59,31 @@ public:
 	}
 };
 
+__global__ void create_sub1(BaseDevice** object, int base_id, int sub_id)
+{
+	*object = new Sub1Device(base_id, sub_id);
+}
+
+void Sub1Host::createOnDevice(BaseDevice** pos)
+{
+	create_sub1<<<1,1>>>(pos, b_id, sub_id);
+}
+
 __global__ void runner(BaseDevice** objects, int len)
 {
 	for (int i=0; i<len; i++)
 		objects[i]->f();
 }
 
-__global__ void create_sub1(BaseDevice** object, int base_id, int sub_id)
-{
-	*object = new Sub1Device(base_id, sub_id);
-}
-
-void run(std::vector<std::unique_ptr<BaseHost>> funcs)
+void run(std::vector<std::unique_ptr<BaseHost>> objs)
 {
 	BaseDevice** d_objects;
-	int index=0;
-	CUDA_CALL(cudaMalloc((void **)&d_objects, funcs.size() * sizeof(BaseDevice*)));
-	for (const auto& f : funcs)
+	CUDA_CALL(cudaMalloc((void **)&d_objects, objs.size() * sizeof(BaseDevice*)));
+	for (int i=0; i<objs.size(); i++)
 	{
-		if (dynamic_cast<Sub1Host*>(f.get()) != nullptr)
-			create_sub1<<<1,1>>>(&d_objects[index], dynamic_cast<Sub1Host*>(f.get())->b_id, dynamic_cast<Sub1Host*>(f.get())->sub_id);
-		else
-		{
-			std::cout << "Warning: Ignoring unknown object." << std::endl;
-			index--;
-		}
-		index++;
+		objs[i]->createOnDevice(&d_objects[i]);
 	}
-	runner<<<1,1>>>(d_objects, index);
+	runner<<<1,1>>>(d_objects, objs.size());
 }
 
 int main()
