@@ -14,26 +14,29 @@ class Base
 public:
 	int b_id;
 public:
-	Base() = default;
 	__host__ __device__ Base(int _b_id):b_id(_b_id){}
+	__host__ __device__ Base(const Base& b):b_id(b.b_id){}
 	virtual ~Base() = default;
 };
 
 class BaseDevice;
 
-class BaseHost : public virtual Base
+class BaseHost : public Base
 {
 public:
+	using Base::Base;
 	virtual void createOnDevice(BaseDevice** pos) = 0;
 };
 
-class BaseDevice : public virtual Base
+class BaseDevice : public Base
 {
 public:
+	using Base::Base;
+	__device__ BaseDevice(const Base& b):Base(b){}
 	__device__ virtual void f() = 0;
 };
 
-class Sub1 : public virtual Base
+class Sub1 // : public Base
 {
 public:
 	int sub_id;
@@ -44,14 +47,15 @@ public:
 class Sub1Host : public BaseHost, public Sub1
 {
 public:
-	Sub1Host(int _b_id, int _sub_id):Base(_b_id), Sub1(_sub_id){}
+	Sub1Host(int _b_id, int _sub_id):BaseHost(_b_id), Sub1(_sub_id){}
 	void createOnDevice(BaseDevice** pos) override;
 };
 
 class Sub1Device : public BaseDevice, public Sub1
 {
 public:
-	__device__ Sub1Device(int _b_id, int _sub_id):Base(_b_id), Sub1(_sub_id){}
+	__device__ Sub1Device(int _b_id, int _sub_id):BaseDevice(_b_id), Sub1(_sub_id){}
+	__device__ Sub1Device(const Sub1Host& h):BaseDevice(h), Sub1(h){}
 public:
 	__device__ void f() override
 	{
@@ -59,14 +63,14 @@ public:
 	}
 };
 
-__global__ void create_sub1(BaseDevice** object, int base_id, int sub_id)
+__global__ void create_sub1(BaseDevice** object, Sub1Host h)
 {
-	*object = new Sub1Device(base_id, sub_id);
+	*object = new Sub1Device(h);
 }
 
 void Sub1Host::createOnDevice(BaseDevice** pos)
 {
-	create_sub1<<<1,1>>>(pos, b_id, sub_id);
+	create_sub1<<<1,1>>>(pos, *this);
 }
 
 __global__ void runner(BaseDevice** objects, int len)
