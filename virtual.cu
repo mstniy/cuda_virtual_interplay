@@ -22,7 +22,7 @@ public:
 	virtual ~device_copyable() = default;
 };
 
-template<typename Base, typename Derived>
+template<typename Derived>
 __global__ void resuscitate_kernel(Derived** objects, int len)
 {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -53,7 +53,7 @@ public:
 		const int TB_SIZE = 128;
 		const int THREAD_COUNT = 16384;
 		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
-		resuscitate_kernel<Base, Derived><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len);
+		resuscitate_kernel<Derived><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len);
 		//cudaDeviceSynchronize();
 	}
 };
