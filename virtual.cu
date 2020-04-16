@@ -18,6 +18,7 @@ class device_copyable
 public:
 	virtual size_t getMostDerivedSize() const = 0;
 	virtual std::pair<Base*, void*> placementNew(void* ptr) const = 0;
+	virtual void copyFrom(void* ptr) = 0;
 	virtual void resusciate(void** pos, int len) = 0;
 	virtual ~device_copyable() = default;
 };
@@ -48,13 +49,18 @@ public:
 		Derived* dp = reinterpret_cast<Derived*>(ptr);
 		return std::make_pair(static_cast<Base*>(dp), (void*)dp);
 	}
+	// Re-forms the object in the host. Changes the vtable to that of the host.
+	void copyFrom(void* ptr) override
+	{
+		new (static_cast<Derived*>(this)) Derived(*reinterpret_cast<Derived*>(ptr));
+	}
+	// Re-forms the object in the device. 
 	void resusciate(void** pos, int len) override
 	{
 		const int TB_SIZE = 128;
 		const int THREAD_COUNT = 16384;
 		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
 		resuscitate_kernel<Derived><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len);
-		//cudaDeviceSynchronize();
 	}
 };
 
@@ -92,6 +98,7 @@ public:
 	__device__ void f() override
 	{
 		printf("hello 2: %d %c!\n", b_id, sub_ch);
+		sub_ch = 'Z';
 	}
 };
 
@@ -145,11 +152,30 @@ void run(std::vector<std::unique_ptr<Base>> objs)
 		pr.second[0]->resusciate(&d_objects_derived[d_objects_index], pr.second.size());
 		d_objects_index += pr.second.size();
 	}
-	// Free the array that holds derived pointers. We don't need them after resuscitation (since we need the Base*s to run virtual methods).
-	cudaFree((void*)d_objects_derived);
 	// Run the demo to make sure everything works.
 	runner<<<1,1>>>(d_objects_base, objs.size());
+	// Synchronize with the device
+	cudaDeviceSynchronize();
+	// Copy the objects back to the host
+	d_objects_index = 0;
+	for (const auto& pr : groups)
+	{
+		for (const auto& obj : pr.second)
+		{
+			obj->copyFrom(d_objects_derived[d_objects_index++]);
+		}
+	}
+	// Another demo to make sure that the changes come back to the host
+	for (const auto& pr : groups)
+	{
+		for (const auto& obj : pr.second)
+		{
+			if (dynamic_cast<Sub2*>(obj.get()))
+				std::cout << static_cast<Sub2*>(obj.get())->sub_ch << std::endl;
+		}
+	}
 	// Free all memory
+	cudaFree((void*)d_objects_derived);
 	cudaFree((void*)d_objects_base);
 	cudaFree((void*)object_buffer);
 }
