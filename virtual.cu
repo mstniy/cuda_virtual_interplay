@@ -110,17 +110,17 @@ __global__ void runner(Base** objects, int len)
 	}
 }
 
-void run(std::vector<std::unique_ptr<Base>> objs)
+void run(const std::vector<std::unique_ptr<Base>>& objs)
 {
 	// Calculate the total size required for the unified memory buffer
 	size_t totalSize=0, currentSize=0;
 	for (const auto& obj : objs)
 		totalSize += obj->getMostDerivedSize();
 	// Group objects of the same dynamic type together
-	std::unordered_map<std::type_index, std::vector<std::unique_ptr<Base>>> groups;
+	std::unordered_map<std::type_index, std::vector<Base*>> groups;
 	for (auto&& obj : objs)
 	{
-		groups[typeid(*obj)].push_back(std::move(obj));
+		groups[typeid(*obj)].push_back(obj.get());
 	}
 	// Allocate memory to store pointers to the objects
 	void** d_objects_derived;
@@ -170,8 +170,8 @@ void run(std::vector<std::unique_ptr<Base>> objs)
 	{
 		for (const auto& obj : pr.second)
 		{
-			if (dynamic_cast<Sub2*>(obj.get()))
-				std::cout << static_cast<Sub2*>(obj.get())->sub_ch << std::endl;
+			if (dynamic_cast<Sub2*>(obj))
+				std::cout << static_cast<Sub2*>(obj)->sub_ch << std::endl;
 		}
 	}
 	// Free all memory
@@ -185,7 +185,7 @@ int main()
 	std::vector<std::unique_ptr<Base>> objs;
 	objs.push_back(std::unique_ptr<Base>(new Sub1(1, 2)));
 	objs.push_back(std::unique_ptr<Base>(new Sub2(3, 'd')));
-	run(std::move(objs));
+	run(objs);
 	cudaDeviceSynchronize();
 	return 0;
 }
