@@ -29,7 +29,7 @@ class implements_device_copyable : virtual public device_copyable<Base>
 public:
 	void copyToDevice(Base** pos) override
 	{
-		copy_to_device<Base, Derived><<<1,1>>>(pos, dynamic_cast<Derived&>(*this));
+		copy_to_device<Base, Derived><<<1,1>>>(pos, static_cast<Derived&>(*this));
 	}
 };
 
