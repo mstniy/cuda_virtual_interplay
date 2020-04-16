@@ -16,15 +16,14 @@ public:
 	__host__ __device__ Base(int _b_id):b_id(_b_id){}
 };
 
-//TODO: We don't really need this
-class BaseHost : public Base
+class BaseHost : public virtual Base
 {
 public:
 	using Base::Base;
 	virtual ~BaseHost() = default;
 };
 
-class BaseDevice : public Base
+class BaseDevice : public virtual Base
 {
 public:
 	using Base::Base;
@@ -32,24 +31,24 @@ public:
 	__device__ virtual void f() = 0;
 };
 
-class Sub1
+class Sub1 : public virtual Base
 {
 public:
 	int sub_id;
-	__host__ __device__ Sub1(int _sub_id):sub_id(_sub_id){}
+	__host__ __device__ Sub1(int _base_id, int _sub_id):Base(_base_id), sub_id(_sub_id){}
 };
 
 class Sub1Host : public BaseHost, public Sub1
 {
 public:
-	Sub1Host(int _b_id, int _sub_id):BaseHost(_b_id), Sub1(_sub_id){}
+	Sub1Host(int _b_id, int _sub_id):Base(_b_id), BaseHost(_b_id), Sub1(_b_id, _sub_id){}
 	virtual ~Sub1Host() = default;
 };
 
 class Sub1Device : public BaseDevice, public Sub1
 {
 public:
-	__device__ Sub1Device(int _b_id, int _sub_id):BaseDevice(_b_id), Sub1(_sub_id){}
+	__device__ Sub1Device(int _b_id, int _sub_id):Base(_b_id), BaseDevice(_b_id), Sub1(_b_id, _sub_id){}
 	__device__ virtual ~Sub1Device() = default;
 public:
 	__device__ void f() override
