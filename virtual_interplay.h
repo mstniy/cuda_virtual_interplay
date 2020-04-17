@@ -18,7 +18,7 @@ class device_copyable
 {
 public:
 	virtual size_t getMostDerivedSize() const = 0;
-	virtual std::pair<Base*, void*> placementNew(void* ptr) const = 0;
+	virtual Base* placementNew(void* ptr) const = 0;
 	virtual void copyFrom(void* ptr) = 0;
 	virtual void resusciateOnDevice(void** pos, int len) = 0;
 	virtual ~device_copyable() = default;
@@ -51,11 +51,11 @@ public:
 	{
 		return sizeof(Derived);
 	}
-	std::pair<Base*, void*> placementNew(void* ptr) const override
+	Base* placementNew(void* ptr) const override
 	{
 		new (ptr) Derived(static_cast<const Derived&>(*this));
 		Derived* dp = reinterpret_cast<Derived*>(ptr);
-		return std::make_pair(static_cast<Base*>(dp), (void*)dp);
+		return static_cast<Base*>(dp);
 	}
 	// Re-forms the object in the host. Changes the vtable to that of the host.
 	void copyFrom(void* ptr) override
@@ -137,9 +137,10 @@ public:
 		{
 			for (const auto& obj : pr.second)
 			{
-				auto ptrp = obj.second->placementNew(object_buffer + currentSize);
-				d_objects_base[obj.first] = ptrp.first;
-				d_objects_derived[d_objects_index++] = ptrp.second;
+				void* derived_ptr = &object_buffer[currentSize];
+				Base* base_ptr = obj.second->placementNew(derived_ptr);
+				d_objects_base[obj.first] = base_ptr;
+				d_objects_derived[d_objects_index++] = derived_ptr;
 				currentSize += obj.second->getMostDerivedSize();
 			}
 		}
