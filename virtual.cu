@@ -19,7 +19,7 @@ public:
 	virtual size_t getMostDerivedSize() const = 0;
 	virtual std::pair<Base*, void*> placementNew(void* ptr) const = 0;
 	virtual void copyFrom(void* ptr) = 0;
-	virtual void resusciate(void** pos, int len) = 0;
+	virtual void resusciateOnDevice(void** pos, int len) = 0;
 	virtual ~device_copyable() = default;
 };
 
@@ -70,8 +70,8 @@ public:
 			new (static_cast<Derived*>(this)) Derived; // Assumes that the default constructor does not initialize data
 		}
 	}
-	// Re-forms the object in the device. 
-	void resusciate(void** pos, int len) override
+	// Re-forms the object in the device. Changes the vtable to that of the device.
+	void resusciateOnDevice(void** pos, int len) override
 	{
 		const int TB_SIZE = 128;
 		const int THREAD_COUNT = 16384;
@@ -168,7 +168,7 @@ void run(const std::vector<std::unique_ptr<Base>>& objs)
 	d_objects_index = 0;
 	for (const auto& pr : groups)
 	{
-		pr.second[0]->resusciate(&d_objects_derived[d_objects_index], pr.second.size());
+		pr.second[0]->resusciateOnDevice(&d_objects_derived[d_objects_index], pr.second.size());
 		d_objects_index += pr.second.size();
 	}
 	// Run the demo to make sure everything works.
