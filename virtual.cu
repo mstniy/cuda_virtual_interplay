@@ -25,6 +25,7 @@ public:
 	__host__ __device__ Base(const Base& b):b_id(b.b_id){}
 	virtual ~Base() = default;
 	__device__ virtual void f() = 0;
+	__host__ __device__ virtual void g() = 0;
 };
 
 class Sub1 : public Base, public implements_device_copyable<Base, Sub1>
@@ -37,7 +38,13 @@ public:
 	__host__ __device__ Sub1(const Sub1& s):Base(s), sub_id(s.sub_id){}
 	__device__ void f() override
 	{
-		printf("hello 1: %d %d!\n", b_id, sub_id);
+		printf("Sub1::f %d %d!\n", b_id, sub_id);
+		b_id++;
+		sub_id++;
+	}
+	__host__ __device__ void g() override
+	{
+		printf("Sub1::g %d %d!\n", b_id, sub_id);
 	}
 };
 
@@ -51,8 +58,13 @@ public:
 	__host__ __device__ Sub2(const Sub2& s):Base(s), sub_ch(s.sub_ch){}
 	__device__ void f() override
 	{
-		printf("hello 2: %d %c!\n", b_id, sub_ch);
-		sub_ch = 'Z';
+		printf("Sub2::f %d %c!\n", b_id, sub_ch);
+		b_id++;
+		sub_ch++;
+	}
+	__host__ __device__ void g() override
+	{
+		printf("Sub2::g %d %c!\n", b_id, sub_ch);
 	}
 };
 
@@ -79,8 +91,7 @@ void run(const std::vector<std::unique_ptr<Base>>& objs)
 	// Another demo to make sure that the changes come back to the host
 	for (Base* obj : raw_objs)
 	{
-		if (dynamic_cast<Sub2*>(obj))
-			std::cout << static_cast<Sub2*>(obj)->sub_ch << std::endl;
+		obj->g();
 	}
 }
 
