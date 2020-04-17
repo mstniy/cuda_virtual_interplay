@@ -14,14 +14,14 @@
 #endif
 
 template<typename Base>
-class device_copyable
+class interplay_movable
 {
 public:
 	virtual size_t getMostDerivedSize() const = 0;
 	virtual Base* moveTo(void* ptr) = 0;
 	virtual void moveFrom(void* ptr) = 0;
-	virtual void resusciateOnDevice(void** pos, int len) = 0;
-	__host__ __device__ virtual ~device_copyable(){};
+	virtual void resuscitateOnDevice(void** pos, int len) = 0;
+	__host__ __device__ virtual ~interplay_movable(){};
 };
 
 template<typename Derived, bool resuscitateVirtualBases>
@@ -44,7 +44,7 @@ __global__ void resuscitate_kernel(Derived** objects, int len)
 }
 
 template<typename Base, typename Derived, bool resuscitateVirtualBases=false>
-class implements_device_copyable : virtual public device_copyable<Base>
+class implements_interplay_movable : virtual public interplay_movable<Base>
 {
 public:
 	size_t getMostDerivedSize() const override
@@ -60,7 +60,7 @@ public:
 	// Re-forms the object in the host. Changes the vtable to that of the host.
 	void moveFrom(void* ptr) override
 	{
-		this->~implements_device_copyable();
+		this->~implements_interplay_movable();
 
 		if (resuscitateVirtualBases == false)
 		{
@@ -68,13 +68,13 @@ public:
 		}
 		else
 		{
-			memcpy(static_cast<Derived*>(this), ptr, getMostDerivedSize());	// We cannot call the copy constructor, because it will most likely try to read data fields from a virtual base class and crash, since the vtable belongs to the device at this point.
+			memcpy(static_cast<Derived*>(this), ptr, getMostDerivedSize());	// We cannot call the move constructor, because it will most likely try to read data fields from a virtual base class and crash, since the vtable belongs to the device at this point.
 											// So we copy the bytes of the object and run a default constructor on it to changed the vtables to the host's ones.
 			new (static_cast<Derived*>(this)) Derived; // Assumes that the default constructor does not initialize data
 		}
 	}
 	// Re-forms the object in the device. Changes the vtable to that of the device.
-	void resusciateOnDevice(void** pos, int len) override
+	void resuscitateOnDevice(void** pos, int len) override
 	{
 		const int TB_SIZE = 128;
 		const int THREAD_COUNT = 16384;
@@ -134,7 +134,7 @@ public:
 	{
 		int d_objects_index = 0;
 		size_t currentSize=0;
-		// Copy the objects into unified memory
+		// Move the objects into unified memory
 		for (const auto& pr : groups)
 		{
 			for (const auto& obj : pr.second)
@@ -148,12 +148,12 @@ public:
 		}
 		// Resuscitate the objects, one group at a time.
 		// Resuscitation lets the device code use the virtual functions of the objects (it probably fixes up the vtable? See https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#virtual-functions)
-		// We actually have a dedicated kernel for each dynamic type, which is what device_copyable::resusciate ends up running.
+		// We actually have a dedicated kernel for each dynamic type, which is what interface_movable::resuscitateOnDevice ends up running.
 		// This keeps us from having to maintain RTTI manually. It also reduces branch divergence on the device.
 		d_objects_index = 0;
 		for (const auto& pr : groups)
 		{
-			pr.second[0].second->resusciateOnDevice(&d_objects_derived[d_objects_index], pr.second.size());
+			pr.second[0].second->resuscitateOnDevice(&d_objects_derived[d_objects_index], pr.second.size());
 			d_objects_index += pr.second.size();
 		}
 

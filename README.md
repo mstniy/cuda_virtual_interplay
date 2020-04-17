@@ -32,7 +32,7 @@ But this will:
 
 ## Usage
 
-`#include "virtual_interplay.h"` to access the library. The base class of the classes to be migrated shall inherit from `device_copyable` and the most derived subclasses shall inherit from `implements_device_copyable`.
+`#include "virtual_interplay.h"` to access the library. The base class of the classes to be migrated shall inherit from `interplay_movable` and the most derived subclasses shall inherit from `implements_interplay_movable`.
 Use `__host__ __device__` to make sure your move constructor is callable from both the host and the device.
 If you want to access virtual bases across CUDA boundaries, set `resuscitateVirtualBases=true` and make sure that the default constructor (and the default constructors of all the parent classes) do not initialize any data fields.
 Mark the virtual functions with `__device__` to let them be used from the device, or with `__host__ __device__` to let them be used on both sides.

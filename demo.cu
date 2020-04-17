@@ -15,7 +15,7 @@
 
 using namespace std;
 
-class Base : public virtual device_copyable<Base>
+class Base : public virtual interplay_movable<Base>
 {
 public:
 	int b_id;
@@ -29,7 +29,7 @@ public:
 	__host__ __device__ virtual void g() = 0;
 };
 
-class Sub1 : public Base, public implements_device_copyable<Base, Sub1>
+class Sub1 : public Base, public implements_interplay_movable<Base, Sub1>
 {
 public:
 	int sub_id;
@@ -50,7 +50,7 @@ public:
 	}
 };
 
-class Sub2 : public Base, public implements_device_copyable<Base, Sub2>
+class Sub2 : public Base, public implements_interplay_movable<Base, Sub2>
 {
 public:
 	char sub_ch;
