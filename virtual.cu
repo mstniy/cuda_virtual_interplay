@@ -23,20 +23,26 @@ public:
 	virtual ~device_copyable() = default;
 };
 
-template<typename Derived>
+template<typename Derived, bool resuscitateVirtualBases>
 __global__ void resuscitate_kernel(Derived** objects, int len)
 {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	int thread_count = gridDim.x * blockDim.x;
 	for (int i=tid; i<len; i += thread_count)
 	{
-		//Derived s(*objects[i]);
-		//new (objects[i]) Derived(s);
-		new (objects[i]) Derived; // Assumes that the default constructor does not initialize data
+		if (resuscitateVirtualBases == false)
+		{
+			Derived s(*objects[i]);
+			new (objects[i]) Derived(s);
+		}
+		else
+		{
+			new (objects[i]) Derived; // Assumes that the default constructor does not initialize data
+		}
 	}
 }
 
-template<typename Base, typename Derived>
+template<typename Base, typename Derived, bool resuscitateVirtualBases=false>
 class implements_device_copyable : virtual public device_copyable<Base>
 {
 public:
@@ -53,9 +59,16 @@ public:
 	// Re-forms the object in the host. Changes the vtable to that of the host.
 	void copyFrom(void* ptr) override
 	{
-		//new (static_cast<Derived*>(this)) Derived(*reinterpret_cast<Derived*>(ptr));
-		memcpy(static_cast<Derived*>(this), ptr, getMostDerivedSize());
-		new (static_cast<Derived*>(this)) Derived; // Assumes that the default constructor does not initialize data
+		if (resuscitateVirtualBases == false)
+		{
+			new (static_cast<Derived*>(this)) Derived(*reinterpret_cast<Derived*>(ptr));
+		}
+		else
+		{
+			memcpy(static_cast<Derived*>(this), ptr, getMostDerivedSize());	// We cannot call the copy constructor, because it will most likely try to read data fields from a virtual base class and crash, since the vtable belongs to the device at this point.
+											// So we copy the bytes of the object and run a default constructor on it to changed the vtables to the host's ones.
+			new (static_cast<Derived*>(this)) Derived; // Assumes that the default constructor does not initialize data
+		}
 	}
 	// Re-forms the object in the device. 
 	void resusciate(void** pos, int len) override
@@ -63,7 +76,7 @@ public:
 		const int TB_SIZE = 128;
 		const int THREAD_COUNT = 16384;
 		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
-		resuscitate_kernel<Derived><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len);
+		resuscitate_kernel<Derived, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len);
 	}
 };
 
