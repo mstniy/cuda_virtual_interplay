@@ -5,12 +5,12 @@ Unfortunately however, only the host can call the virtual methods of the objects
 See [CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#virtual-functions).
 The case is similar with virtual inheritance. Only the host can access the member fields and methods of the virtual bases of the objects created on the host and vice versa.
 This library lets you smoothly migrate such objects from the host to the device and vice versa.
-How? It basically copy-constructs the objects where they are needed, so they retain their data while having a valid vtable.
+How? It basically move-constructs the objects where they are needed, so they retain their data while having a valid vtable.
 
 It requires that:
 * Your GPU supports unified memory (everything above and including Kepler supports it)
-* The classes to be migrated do not manage any resources (or they will leak)
-* The classes to be migrated are copy-constructible
+* The classes to be migrated are move-constructible
+* The classes to be migrated do not need to be destructed after being moved
 
 It can also migrate classes with virtual bases. In this case it also requires that the default constructor does not initialize any data field. So this won't work:
 
@@ -33,7 +33,7 @@ But this will:
 ## Usage
 
 `#include "virtual_interplay.h"` to access the library. The base class of the classes to be migrated shall inherit from `device_copyable` and the most derived subclasses shall inherit from `implements_device_copyable`.
-Use `__host__ __device__` to make sure your copy constructor is callable from both the host and the device.
+Use `__host__ __device__` to make sure your move constructor is callable from both the host and the device.
 If you want to access virtual bases across CUDA boundaries, set `resuscitateVirtualBases=true` and make sure that the default constructor (and the default constructors of all the parent classes) do not initialize any data fields.
 Mark the virtual functions with `__device__` to let them be used from the device, or with `__host__ __device__` to let them be used on both sides.
 

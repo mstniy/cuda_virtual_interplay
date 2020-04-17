@@ -18,10 +18,10 @@ class device_copyable
 {
 public:
 	virtual size_t getMostDerivedSize() const = 0;
-	virtual Base* placementNew(void* ptr) const = 0;
-	virtual void copyFrom(void* ptr) = 0;
+	virtual Base* moveTo(void* ptr) = 0;
+	virtual void moveFrom(void* ptr) = 0;
 	virtual void resusciateOnDevice(void** pos, int len) = 0;
-	virtual ~device_copyable() = default;
+	__host__ __device__ virtual ~device_copyable(){};
 };
 
 template<typename Derived, bool resuscitateVirtualBases>
@@ -33,8 +33,8 @@ __global__ void resuscitate_kernel(Derived** objects, int len)
 	{
 		if (resuscitateVirtualBases == false)
 		{
-			Derived s(*objects[i]);
-			new (objects[i]) Derived(s);
+			Derived s(std::move(*objects[i]));
+			new (objects[i]) Derived(std::move(s));
 		}
 		else
 		{
@@ -51,18 +51,20 @@ public:
 	{
 		return sizeof(Derived);
 	}
-	Base* placementNew(void* ptr) const override
+	Base* moveTo(void* ptr) override
 	{
-		new (ptr) Derived(static_cast<const Derived&>(*this));
+		new (ptr) Derived(std::move(static_cast<Derived&>(*this)));
 		Derived* dp = reinterpret_cast<Derived*>(ptr);
 		return static_cast<Base*>(dp);
 	}
 	// Re-forms the object in the host. Changes the vtable to that of the host.
-	void copyFrom(void* ptr) override
+	void moveFrom(void* ptr) override
 	{
+		this->~implements_device_copyable();
+
 		if (resuscitateVirtualBases == false)
 		{
-			new (static_cast<Derived*>(this)) Derived(*reinterpret_cast<Derived*>(ptr));
+			new (static_cast<Derived*>(this)) Derived(std::move(*reinterpret_cast<Derived*>(ptr)));
 		}
 		else
 		{
@@ -138,7 +140,7 @@ public:
 			for (const auto& obj : pr.second)
 			{
 				void* derived_ptr = &object_buffer[currentSize];
-				Base* base_ptr = obj.second->placementNew(derived_ptr);
+				Base* base_ptr = obj.second->moveTo(derived_ptr);
 				d_objects_base[obj.first] = base_ptr;
 				d_objects_derived[d_objects_index++] = derived_ptr;
 				currentSize += obj.second->getMostDerivedSize();
@@ -167,7 +169,7 @@ public:
 		{
 			for (const auto& obj : pr.second)
 			{
-				obj.second->copyFrom(d_objects_derived[d_objects_index++]);
+				obj.second->moveFrom(d_objects_derived[d_objects_index++]);
 			}
 		}
 	}
