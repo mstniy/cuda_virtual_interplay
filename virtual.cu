@@ -30,8 +30,9 @@ __global__ void resuscitate_kernel(Derived** objects, int len)
 	int thread_count = gridDim.x * blockDim.x;
 	for (int i=tid; i<len; i += thread_count)
 	{
-		Derived s(*objects[i]);
-		new (objects[i]) Derived(s);
+		//Derived s(*objects[i]);
+		//new (objects[i]) Derived(s);
+		new (objects[i]) Derived; // Assumes that the default constructor does not initialize data
 	}
 }
 
@@ -52,7 +53,9 @@ public:
 	// Re-forms the object in the host. Changes the vtable to that of the host.
 	void copyFrom(void* ptr) override
 	{
-		new (static_cast<Derived*>(this)) Derived(*reinterpret_cast<Derived*>(ptr));
+		//new (static_cast<Derived*>(this)) Derived(*reinterpret_cast<Derived*>(ptr));
+		memcpy(static_cast<Derived*>(this), ptr, getMostDerivedSize());
+		new (static_cast<Derived*>(this)) Derived; // Assumes that the default constructor does not initialize data
 	}
 	// Re-forms the object in the device. 
 	void resusciate(void** pos, int len) override
@@ -69,6 +72,7 @@ class Base : public virtual device_copyable<Base>
 public:
 	int b_id;
 public:
+	Base() = default;
 	__host__ __device__ Base(int _b_id):b_id(_b_id){}
 	__host__ __device__ Base(const Base& b):b_id(b.b_id){}
 	virtual ~Base() = default;
@@ -80,6 +84,7 @@ class Sub1 : public Base, public implements_device_copyable<Base, Sub1>
 public:
 	int sub_id;
 public:
+	Sub1() = default;
 	__host__ __device__ Sub1(int _b_id, int _sub_id):Base(_b_id), sub_id(_sub_id){}
 	__host__ __device__ Sub1(const Sub1& s):Base(s), sub_id(s.sub_id){}
 	__device__ void f() override
@@ -93,6 +98,7 @@ class Sub2 : public Base, public implements_device_copyable<Base, Sub2>
 public:
 	char sub_ch;
 public:
+	Sub2() = default;
 	__host__ __device__ Sub2(int _b_id, char _sub_ch):Base(_b_id), sub_ch(_sub_ch){}
 	__host__ __device__ Sub2(const Sub2& s):Base(s), sub_ch(s.sub_ch){}
 	__device__ void f() override
