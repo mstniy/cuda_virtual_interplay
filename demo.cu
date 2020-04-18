@@ -29,7 +29,7 @@ public:
 	__host__ __device__ virtual void g() = 0;
 };
 
-class Sub1 : public Base, public implements_interplay_movable<Base, Sub1>
+class Sub1 : virtual public Base, public implements_interplay_movable<Base, Sub1>
 {
 public:
 	int sub_id;
