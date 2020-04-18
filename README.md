@@ -30,6 +30,8 @@ But this will:
     	A() = default;
     };
 
+The branch *vtable_map* hosts a different approach that removes this requirement.
+
 ## Usage
 
 `#include "virtual_interplay.h"` to access the library. The base class of the classes to be migrated shall inherit from `interplay_movable` and the most derived subclasses shall inherit from `implements_interplay_movable`.
