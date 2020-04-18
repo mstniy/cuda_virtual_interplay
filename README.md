@@ -36,6 +36,7 @@ But this will:
         ...
     };
 
+The approach taken by the master branch does not have this restriction, if you do not need to access migrate virtual base classes.
 One disadvantage of this method is that it can fail silently by mistaking data bytes for vtable bytes and overwriting them during migrations.
 For a technique that fails loudly, see the master branch.
 

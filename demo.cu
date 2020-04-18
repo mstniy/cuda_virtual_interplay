@@ -30,7 +30,7 @@ public:
 };
 
 // Classes with virtual bases are supported
-class Sub1 : virtual public Base, public implements_interplay_movable<Base, Sub1>
+class Sub1 : virtual public Base, public implements_interplay_movable<Base, Sub1, true>
 {
 public:
 	int sub_id;

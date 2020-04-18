@@ -27,7 +27,7 @@ __global__ void destruct_object_kernel(Derived* ptr)
 	ptr->~Derived();
 }
 
-template<typename Derived>
+template<typename Derived, bool resuscitateVirtualBases>
 class Resuscitator
 {
 public:
@@ -39,6 +39,9 @@ public:
 public:
 	Resuscitator()
 	{
+		if (resuscitateVirtualBases == false)
+			return ;
+
 		h_derived = (Derived*)malloc(sizeof(Derived));
 		memset(h_derived, 0, sizeof(Derived)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
 		new (h_derived) Derived;
@@ -53,19 +56,30 @@ public:
 
 	__host__ __device__ void resuscitate(Derived* object) const
 	{
-		for (int i=0; i<sizeof(Derived); i++)
-			if (isPartOfVtable[i])
-			{
+		if (resuscitateVirtualBases == false)
+		{
+			Derived s(std::move(*object));
+			new (object) Derived(std::move(s));
+		}
+		else
+		{
+			for (int i=0; i<sizeof(Derived); i++)
+				if (isPartOfVtable[i])
+				{
 #ifdef __CUDA_ARCH__
-				((char*)object)[i] = ((char*)d_derived)[i];
+					((char*)object)[i] = ((char*)d_derived)[i];
 #else
-				((char*)object)[i] = ((char*)h_derived)[i];
+					((char*)object)[i] = ((char*)h_derived)[i];
 #endif
-			}
+				}
+		}
 	}
 
 	~Resuscitator()
 	{
+		if (resuscitateVirtualBases == false)
+			return ;
+
 		h_derived->~Derived();
 		free(h_derived);
 		destruct_object_kernel<<<1, 1>>>(d_derived);
@@ -74,8 +88,8 @@ public:
 	}
 };
 
-template<typename Derived>
-__global__ void resuscitate_kernel(Derived** objects, int len, const Resuscitator<Derived>* rtor)
+template<typename Derived, bool resuscitateVirtualBases>
+__global__ void resuscitate_kernel(Derived** objects, int len, const Resuscitator<Derived, resuscitateVirtualBases>* rtor)
 {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	int thread_count = gridDim.x * blockDim.x;
@@ -98,9 +112,10 @@ public:
 	__host__ __device__ virtual ~interplay_movable(){};
 };
 
-template<typename Base, typename Derived>
+template<typename Base, typename Derived, bool resuscitateVirtualBases=false>
 class implements_interplay_movable : virtual public interplay_movable<Base>
 {
+	using MyResuscitator = Resuscitator<Derived, resuscitateVirtualBases>;
 public:
 	size_t getMostDerivedSize() const override
 	{
@@ -108,14 +123,14 @@ public:
 	}
 	const void* createResuscitator() const override
 	{
-		Resuscitator<Derived>* rtor;
-		CUDA_CALL(cudaMallocManaged((void **)&rtor, sizeof(Resuscitator<Derived>)));
-		new (rtor) Resuscitator<Derived>;
+		MyResuscitator* rtor;
+		CUDA_CALL(cudaMallocManaged((void **)&rtor, sizeof(MyResuscitator)));
+		new (rtor) MyResuscitator;
 		return rtor;
 	}
 	void deleteResuscitator(const void* rtor) const override
 	{
-		((Resuscitator<Derived>*)rtor)->~Resuscitator<Derived>();
+		((MyResuscitator*)rtor)->~MyResuscitator();
 		cudaFree((void*)rtor);
 	}
 	Base* moveTo(void* ptr) override
@@ -127,7 +142,7 @@ public:
 	// Re-forms the object in the host. Changes the vtable to that of the host.
 	void moveFromDevice(void* ptr, const void* rtor) override
 	{
-		((const Resuscitator<Derived>*)rtor)->resuscitate((Derived*)ptr); // We need to resuscitate the object in case it contains virtual bases
+		((const MyResuscitator*)rtor)->resuscitate((Derived*)ptr); // We need to resuscitate the object in case it contains virtual bases
 		this->~implements_interplay_movable();
 		new (static_cast<Derived*>(this)) Derived(std::move(*(Derived*)(ptr)));
 	}
@@ -137,7 +152,7 @@ public:
 		const int TB_SIZE = 128;
 		const int THREAD_COUNT = 16384;
 		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
-		resuscitate_kernel<Derived><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len, (const Resuscitator<Derived>*)rtor);
+		resuscitate_kernel<Derived, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len, (const MyResuscitator*)rtor);
 	}
 };
 
