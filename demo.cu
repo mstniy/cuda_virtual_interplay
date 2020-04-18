@@ -29,7 +29,8 @@ public:
 	__host__ __device__ virtual void g() = 0;
 };
 
-class Sub1 : public Base, public implements_interplay_movable<Base, Sub1>
+// Classes with virtual bases are supported
+class Sub1 : virtual public Base, public implements_interplay_movable<Base, Sub1, true>
 {
 public:
 	int sub_id;
