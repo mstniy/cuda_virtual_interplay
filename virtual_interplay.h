@@ -17,6 +17,7 @@
 template<typename Derived>
 __global__ void construct_object_kernel(Derived* ptr)
 {
+	memset(ptr, 0, sizeof(Derived)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
 	new (ptr) Derived;
 }
 
@@ -31,19 +32,22 @@ class Resuscitator
 {
 public:
 	Derived* d_derived; // A Derived which is constructed on the device
-	Derived h_derived; // A Derived which is constructed on the host
+	Derived* h_derived; // A Derived which is constructed on the host
 	// Bytemap describing which bytes of Derived belong to vtable and which ones ara part of data
 	// vtable bytes get corrected during resuscitation, data bytes do not get overwritten.
 	bool isPartOfVtable[sizeof(Derived)]={};
 public:
 	Resuscitator()
 	{
+		h_derived = (Derived*)malloc(sizeof(Derived));
+		memset(h_derived, 0, sizeof(Derived)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
+		new (h_derived) Derived;
 		CUDA_CALL(cudaMallocManaged((void **)&d_derived, sizeof(Derived)));
 		construct_object_kernel<Derived><<<1,1>>>(d_derived);
 		cudaDeviceSynchronize();	
 		for (int i=0; i<sizeof(Derived);i++)
 		{
-			isPartOfVtable[i] = ((char*)d_derived)[i] != ((char*)&h_derived)[i];
+			isPartOfVtable[i] = ((char*)d_derived)[i] != ((char*)h_derived)[i];
 		}
 	}
 
@@ -55,13 +59,15 @@ public:
 #ifdef __CUDA_ARCH__
 				((char*)object)[i] = ((char*)d_derived)[i];
 #else
-				((char*)object)[i] = ((char*)&h_derived)[i];
+				((char*)object)[i] = ((char*)h_derived)[i];
 #endif
 			}
 	}
 
 	~Resuscitator()
 	{
+		h_derived->~Derived();
+		free(h_derived);
 		destruct_object_kernel<<<1, 1>>>(d_derived);
 		cudaDeviceSynchronize();
 		cudaFree(d_derived);
