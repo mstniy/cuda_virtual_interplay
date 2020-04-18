@@ -93,7 +93,7 @@ public:
 	virtual const void* createResuscitator() const = 0;
 	virtual void deleteResuscitator(const void* rtor) const = 0;
 	virtual Base* moveTo(void* ptr) = 0;
-	virtual void moveFrom(void* ptr, const void* rtor) = 0;
+	virtual void moveFromDevice(void* ptr, const void* rtor) = 0;
 	virtual void resuscitateOnDevice(void** pos, int len, const void* rtor) = 0;
 	__host__ __device__ virtual ~interplay_movable(){};
 };
@@ -125,7 +125,7 @@ public:
 		return static_cast<Base*>(dp);
 	}
 	// Re-forms the object in the host. Changes the vtable to that of the host.
-	void moveFrom(void* ptr, const void* rtor) override
+	void moveFromDevice(void* ptr, const void* rtor) override
 	{
 		((const Resuscitator<Derived>*)rtor)->resuscitate((Derived*)ptr); // We need to resuscitate the object in case it contains virtual bases
 		this->~implements_interplay_movable();
@@ -209,7 +209,7 @@ public:
 			}
 		}
 		// Resuscitate the objects, one group at a time.
-		// Resuscitation lets the device code use the virtual functions of the objects (it probably fixes up the vtable? See https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#virtual-functions)
+		// Resuscitation lets the device use the virtual functions and access the virtual bases of objects created on the host and vica versa.
 		// We actually have a dedicated kernel for each dynamic type, which is what interface_movable::resuscitateOnDevice ends up running.
 		// This keeps us from having to maintain RTTI manually. It also reduces branch divergence on the device.
 		d_objects_index = 0;
@@ -232,7 +232,7 @@ public:
 			const void* rtor = pr.second.first;
 			for (const auto& obj : pr.second.second)
 			{
-				obj.second->moveFrom(d_objects_derived[d_objects_index++], rtor);
+				obj.second->moveFromDevice(d_objects_derived[d_objects_index++], rtor);
 			}
 		}
 	}
