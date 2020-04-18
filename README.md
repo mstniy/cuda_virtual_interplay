@@ -7,17 +7,19 @@ The case is similar with virtual inheritance: Only the host can access the membe
 This library lets you smoothly migrate such objects from the host to the device and back.
 
 ## How does it work?
-For each most derived type, the library constructs two objects, one on the host and one on the device. It assumes that all the positions where these objects differ are part of the vtable.
-During migrations, bytes that are determined to belong to vtables are fixed.
+If not asked to migrate virtual bases, it simply move constructs the objects on the host/device to fix their vtable.  
+If asked to migrate virtual bases, the library constructs, for each most derived type, two objects, one on the host and one on the device. It assumes that all the positions where these objects differ are part of the vtable. During migrations, bytes that are determined to belong to vtables are fixed.
 
 It requires that:
 * Your GPU supports unified memory (everything above and including Kepler supports it)
 * Memory layouts of objects are the same on both the host and the device (unlikely to be true on Windows, not tested)
-* The classes to be migrated are default- and move-constructible
-* The classes to be migrated do not need to be destructed after being moved
-* The default constructor always initializes data fields to the same value, or does not initialize them
+* The classes to be migrated are move-constructible
+* The classes to be migrated do not need to be destructed after being move constructed
 
-So this won't work:
+It can also migrate classes with virtual bases. In this case it also requires that:
+
+* The classes to be migrated are default-constructible
+* The default constructor either always initializes data fields to the same value, or does not initialize them. So this won't work:
 
     class A
     {
@@ -36,14 +38,13 @@ But this will:
         ...
     };
 
-The approach taken by the master branch does not have this restriction, if you do not need to access migrate virtual base classes.
-One disadvantage of this method is that it can fail silently by mistaking data bytes for vtable bytes and overwriting them during migrations.
-For a technique that fails loudly, see the master branch.
+One disadvantage of trying to migrate virtual bases is that it can fail silently by mistaking data bytes for vtable bytes and overwriting them during migrations. It is also slower, since it needs to check every byte to see if it belongs to the vtable or not.
 
 ## Usage
 
 `#include "virtual_interplay.h"` to access the library. The base class of the classes to be migrated shall inherit from `interplay_movable` and the most derived subclasses shall inherit from `implements_interplay_movable`.
-Use `__host__ __device__` to make sure your move and default constructors are callable from both the host and the device.
+If you need to access virtual bases across CUDA boundaries, set `resuscitateVirtualBases=true`.
+Use `__host__ __device__` to make sure your move (and default, if you want to migrate virtual bases) constructor is callable from both the host and the device.
 Mark the virtual functions with `__device__` to let them be used from the device, or with `__host__ __device__` to let them be used on both sides.
 
 To migrate an array of objects to the device, do:
