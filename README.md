@@ -8,7 +8,7 @@ This library lets you smoothly migrate such objects from the host to the device 
 
 ## How does it work?
 If not asked to migrate virtual bases, it simply move constructs the objects on the host/device to fix their vtable.  
-If asked to migrate virtual bases, the library constructs, for each most derived type, two objects, one on the host and one on the device. It assumes that all the positions where these objects differ are part of the vtable. During migrations, bytes that are determined to belong to vtables are fixed.
+If asked to migrate virtual bases, the library constructs, for each most derived type, two objects, one on the host and one on the device. It assumes that all the positions where these objects differ are part of the vtable. During migrations, bytes that are determined to belong to vtables get fixed.
 
 It requires that:
 * Your GPU supports unified memory (everything above and including Kepler supports it)
@@ -21,12 +21,15 @@ It can also migrate classes with virtual bases. In this case it also requires th
 * The classes to be migrated are default-constructible
 * The default constructor either always initializes data fields to the same value, or does not initialize them. So this won't work:
 
+
     class A
     {
         ...
     	int* x=new int;
     	...
     };
+    
+It would cause the library to mistake data bytes for vtable bytes and silently overwrite them during migrations. 
 
 But this will:
 
@@ -38,7 +41,7 @@ But this will:
         ...
     };
 
-One disadvantage of trying to migrate virtual bases is that it can fail silently by mistaking data bytes for vtable bytes and overwriting them during migrations. It is also slower, since it needs to check every byte to see if it belongs to the vtable or not.
+Another disadvantage to migrating virtual bases is that it is slower, since it needs to check every byte to see if it belongs to the vtable or not.
 
 ## Usage
 
