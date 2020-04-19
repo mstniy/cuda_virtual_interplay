@@ -182,7 +182,7 @@ public:
 		o.object_buffer = NULL;
 		o.d_objects_base=NULL;
 	}
-	ClassMigrator(std::vector<Base*> objs)
+	ClassMigrator(const std::vector<Base*>& objs)
 	{
 		// Calculate the total size required for the unified memory buffer
 		for (const auto& obj : objs)
