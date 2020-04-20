@@ -45,10 +45,12 @@ Another disadvantage to migrating virtual bases is that it is slower, since it n
 
 ## Usage
 
-`#include "virtual_interplay.h"` to access the library. The base class of the classes to be migrated shall inherit virtually from `interplay_movable` and the most derived subclasses shall inherit from `implements_interplay_movable`.
-If you need to access virtual bases across CUDA boundaries, set `resuscitateVirtualBases=true`.
-Use `__host__ __device__` to make sure your move (and default, if you want to migrate virtual bases) constructor is callable from both the host and the device.
-Mark the virtual functions with `__device__` to let them be used from the device, or with `__host__ __device__` to let them be used on both sides.
+`#include "virtual_interplay.h"` to access the library.  
+The base class of the classes to be migrated shall inherit virtually from `interplay_movable` and the most derived subclasses shall inherit from `implements_interplay_movable`.  
+If you need to access virtual bases across CUDA boundaries, set `resuscitateVirtualBases=true`.  
+Use `__host__ __device__` to make sure your move (and default, if you want to migrate virtual bases) constructor is callable from both the host and the device.  
+Mark the virtual functions with `__device__` to let them be used from the device, or with `__host__ __device__` to let them be used on both sides.  
+Make sure the classes you want to migrate have explicit move constructors (implicit and =default'ed move constructors do not work for some reason).  
 
 To migrate an array of objects to the device, do:
 

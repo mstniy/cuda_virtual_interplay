@@ -265,7 +265,7 @@ public:
 			for (const auto& obj : pr.second.second)
 			{
 				void* derived_ptr = &object_buffer[currentSize];
-				Base* base_ptr = dynamic_cast<Base*>(obj.second->moveTo(derived_ptr));
+				Base* base_ptr = dynamic_cast<Base*>(obj.second->moveTo(derived_ptr)); // TODO: We're already paying for a virtual function call, can we get rid of the dynamic_cast?
 				d_objects_base[obj.first] = base_ptr;
 				d_objects_derived[d_objects_index++] = derived_ptr;
 				currentSize += obj.second->getMostDerivedSize();
