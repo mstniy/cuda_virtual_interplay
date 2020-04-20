@@ -56,7 +56,7 @@ class Sub2 : public Base, public implements_interplay_movable<Base, Sub2>
 public:
 	char sub_ch;
 public:
-	Sub2() = default;
+	Sub2() = delete; // non-default constructible classes are also supported
 	__host__ __device__ Sub2(int _b_id, char _sub_ch):Base(_b_id), sub_ch(_sub_ch){}
 	Sub2(const Sub2&) = delete; // non-copy constructible classes are also supported
 	__device__ __host__ Sub2(Sub2&& s):Base(std::move(s)), sub_ch(s.sub_ch){}

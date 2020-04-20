@@ -104,6 +104,58 @@ public:
 	__host__ __device__ virtual ~interplay_movable(){};
 };
 
+// It is amazing how many hoops you have to jump through to emulate "if constexpr" < C++17
+template<typename Derived, bool resuscitateVirtualBases>
+class CreateResuscitatorImpl;
+
+template<typename Derived>
+class CreateResuscitatorImpl<Derived, false>
+{
+public:
+	static void* create()
+	{
+		// We do not need Resuscitator if we do not need to resuscitate virtual bases
+		return NULL;
+	}
+};
+
+template<typename Derived>
+class CreateResuscitatorImpl<Derived, true>
+{
+public:
+	static void* create()
+	{
+		Resuscitator<Derived>* rtor;
+		CUDA_CALL(cudaMallocManaged((void **)&rtor, sizeof(Resuscitator<Derived>)));
+		new (rtor) Resuscitator<Derived>;
+		return rtor;
+	}
+};
+
+template<typename Derived, bool resuscitateVirtualBases>
+class DeleteResuscitatorImpl;
+
+template<typename Derived>
+class DeleteResuscitatorImpl<Derived, false>
+{
+public:
+	static void del(const void* /*rtor*/)
+	{
+		return ;
+	}
+};
+
+template<typename Derived>
+class DeleteResuscitatorImpl<Derived, true>
+{
+public:
+	static void del(const void* rtor)
+	{
+		((Resuscitator<Derived>*)rtor)->~Resuscitator<Derived>();
+		cudaFree((void*)rtor);
+	}
+};
+
 template<typename Base, typename Derived, bool resuscitateVirtualBases=false>
 class implements_interplay_movable : virtual public interplay_movable<Base>
 {
@@ -115,22 +167,11 @@ public:
 	}
 	const void* createResuscitator() const override
 	{
-		// We do not need Resuscitator if we do not need to resuscitate virtual bases
-		if (resuscitateVirtualBases == false)
-			return NULL;
-
-		MyResuscitator* rtor;
-		CUDA_CALL(cudaMallocManaged((void **)&rtor, sizeof(MyResuscitator)));
-		new (rtor) MyResuscitator;
-		return rtor;
+		return CreateResuscitatorImpl<Derived, resuscitateVirtualBases>::create();
 	}
 	void deleteResuscitator(const void* rtor) const override
 	{
-		if (resuscitateVirtualBases == false)
-			return ;
-
-		((MyResuscitator*)rtor)->~MyResuscitator();
-		cudaFree((void*)rtor);
+		DeleteResuscitatorImpl<Derived, resuscitateVirtualBases>::del(rtor);
 	}
 	Base* moveTo(void* ptr) override
 	{
