@@ -225,6 +225,9 @@ public:
 	}
 	ClassMigrator(const std::vector<Base*>& objs)
 	{
+		if (objs.size() == 0)
+			return ;
+
 		// Calculate the total size required for the unified memory buffer
 		for (const auto& obj : objs)
 			totalSize += obj->getMostDerivedSize();
@@ -253,6 +256,7 @@ public:
 
 	Base** toDevice()
 	{
+		cudaDeviceSynchronize();
 		int d_objects_index = 0;
 		size_t currentSize=0;
 		// Move the objects into unified memory
@@ -277,6 +281,8 @@ public:
 			pr.second.second[0].second->resuscitateOnDevice(&d_objects_derived[d_objects_index], pr.second.second.size(), pr.second.first);
 			d_objects_index += pr.second.second.size();
 		}
+
+		cudaDeviceSynchronize();
 
 		return d_objects_base;
 	}
