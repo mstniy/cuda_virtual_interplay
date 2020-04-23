@@ -209,6 +209,7 @@ private:
 	void** d_objects_derived=NULL;
 	Base** d_objects_base=NULL;
 	char* object_buffer=NULL;
+	static constexpr bool base_final=std::is_final<Base>::value;
 public:
 	ClassMigrator() = default;
 	ClassMigrator(const ClassMigrator&) = delete;
@@ -229,8 +230,13 @@ public:
 			return ;
 
 		// Calculate the total size required for the unified memory buffer
-		for (const auto& obj : objs)
-			totalSize += obj->getMostDerivedSize();
+		if (base_final)
+			totalSize = sizeof(Base)*objs.size();
+		else
+		{
+			for (const auto& obj : objs)
+				totalSize += obj->getMostDerivedSize();
+		}
 		// Group objects of the same dynamic type together
 		for (int i=0; i<objs.size(); i++)
 		{
@@ -240,7 +246,8 @@ public:
 			pr.second.first = pr.second.second[0].second->createResuscitator();
 		// Allocate memory to store pointers to the objects
 		CUDA_CALL(cudaMallocManaged((void **)&d_objects_derived, objs.size() * sizeof(void*)));
-		CUDA_CALL(cudaMallocManaged((void **)&d_objects_base, objs.size() * sizeof(Base*)));
+		if (base_final == false)
+			CUDA_CALL(cudaMallocManaged((void **)&d_objects_base, objs.size() * sizeof(Base*)));
 		// Allocate memory to store the objects
 		CUDA_CALL(cudaMallocManaged((void **)&object_buffer, totalSize));
 	}
@@ -266,9 +273,14 @@ public:
 			{
 				void* derived_ptr = &object_buffer[currentSize];
 				Base* base_ptr = dynamic_cast<Base*>(obj.second->moveTo(derived_ptr)); // TODO: We're already paying for a virtual function call, can we get rid of the dynamic_cast?
-				d_objects_base[obj.first] = base_ptr;
 				d_objects_derived[d_objects_index++] = derived_ptr;
-				currentSize += obj.second->getMostDerivedSize();
+				if (base_final == false)
+				{
+					currentSize += obj.second->getMostDerivedSize();
+					d_objects_base[obj.first] = base_ptr;
+				}
+				else
+					currentSize += sizeof(Base);
 			}
 		}
 		// Resuscitate the objects, one group at a time.
@@ -284,7 +296,10 @@ public:
 
 		cudaDeviceSynchronize();
 
-		return d_objects_base;
+		if (base_final == false)
+			return d_objects_base;
+		else
+			return (Base**)d_objects_derived;
 	}
 
 	void toHost() // Careful: overwrites the given objects
