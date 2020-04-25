@@ -2,9 +2,6 @@
 #include <vector>
 #include <memory>
 #include <iostream>
-#include <typeindex>
-#include <unordered_map>
-#include <utility>
 #include "virtual_interplay.h"
 
 #ifndef CUDA_CALL
@@ -15,7 +12,7 @@
 
 using namespace std;
 
-class Base : public virtual interplay_movable<Base>
+class Base : public Managed
 {
 public:
 	int b_id;
@@ -30,7 +27,7 @@ public:
 };
 
 // Classes with virtual bases are supported
-class Sub1 : virtual public Base, public implements_interplay_movable<Base, Sub1, true>
+class Sub1 : virtual public Base
 {
 public:
 	int sub_id;
@@ -51,7 +48,7 @@ public:
 	}
 };
 
-class Sub2 : public Base, public implements_interplay_movable<Base, Sub2>
+class Sub2 : public Base
 {
 public:
 	char sub_ch;
@@ -72,7 +69,7 @@ public:
 	}
 };
 
-__global__ void runner(Base** objects, int len)
+__global__ void runner(Unified<Base*>* objects, int len)
 {
 	for (int i=0; i<len; i++)
 	{
@@ -80,31 +77,27 @@ __global__ void runner(Base** objects, int len)
 	}
 }
 
-void run(const std::vector<std::unique_ptr<Base>>& objs)
-{
-	std::vector<Base*> raw_objs;
-	for (const auto& obj : objs)
-		raw_objs.push_back(obj.get());
-	ClassMigrator<Base> migrator(raw_objs);
-	// Migrate the objects to the device
-	Base** d_objs = migrator.toDevice();
-	// Run the demo to make sure everything works.
-	runner<<<1,1>>>(d_objs, objs.size());
-	// Migrate the objects back to the host
-	migrator.toHost();
-	// Another demo to make sure that the changes come back to the host
-	for (Base* obj : raw_objs)
-	{
-		obj->g();
-	}
-}
-
 int main()
 {
-	std::vector<std::unique_ptr<Base>> objs;
-	objs.push_back(std::unique_ptr<Base>(new Sub1(1, 2)));
-	objs.push_back(std::unique_ptr<Base>(new Sub2(3, 'd')));
-	run(objs);
+	unique_ptr<Sub1> s1(new Sub1(1, 2));
+	unique_ptr<Sub2> s2(new Sub2(3, 'd'));
+	ClassMigrator<Sub1, true> sub1_migrator(s1.get(), 1);
+	ClassMigrator<Sub2> sub2_migrator(s2.get(), 1);
+	unique_ptr<Unified<Base*>[]> objs(new Unified<Base*>[2]);
+	objs[0] = s1.get();
+	objs[1] = s2.get();
+	// Migrate the objects to the device
+	sub1_migrator.toDevice();
+	sub2_migrator.toDevice();
+	cudaDeviceSynchronize();
+	// Run the demo to make sure everything works.
+	runner<<<1,1>>>(objs.get(), 2);
+	// Migrate the objects back to the host
+	sub1_migrator.toHost();
+	sub2_migrator.toHost();
+	// Another demo to make sure that the changes come back to the host
+	objs[0]->g();
+	objs[1]->g();
 	cudaDeviceSynchronize();
 	return 0;
 }

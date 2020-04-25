@@ -2,317 +2,277 @@
 #define VIRTUAL_INTERPLAY_H
 
 #include <stdio.h>
-#include <vector>
-#include <typeindex>
 #include <type_traits>
-#include <unordered_map>
-#include <utility>
+#include <new>
 
-#ifndef CUDA_CALL
-#define CUDA_CALL(x) do { if((x) != cudaSuccess) { \
-    printf("Error at %s:%d\n",__FILE__,__LINE__); \
-    exit(EXIT_FAILURE);}} while(0)
+class Managed
+{
+public:
+	void* operator new(std::size_t count, const std::nothrow_t& /*tag*/) noexcept
+	{
+		void* ptr;
+		if (cudaSuccess != cudaMallocManaged(&ptr, count))
+			return nullptr;
+		cudaDeviceSynchronize();
+		return ptr;
+	}
+	__host__ __device__ void* operator new(std::size_t count)
+	{
+#ifdef __CUDA_ARCH__
+		return ::operator new(count);
+#else
+		void* ptr = operator new(count, std::nothrow);
+		if (ptr == nullptr)
+			throw std::bad_alloc{};
+		return ptr;
 #endif
+	}
+	__host__ __device__ void* operator new(std::size_t /*count*/, void* ptr)
+	{
+		return ptr;
+	}
+	void* operator new[](std::size_t count, const std::nothrow_t& tag) noexcept
+	{
+		return operator new(count, tag);
+	}
+	__host__ __device__ void* operator new[](std::size_t count)
+	{
+#ifdef __CUDA_ARCH__
+		return ::operator new[](count);
+#else
+		return operator new(count);
+#endif
+	}
+	__host__ __device__ void* operator new[](std::size_t /*count*/, void* ptr)
+	{
+		return ptr;
+	}
+	__host__ __device__ void operator delete(void* ptr)
+	{
+#ifdef __CUDA_ARCH__
+		::operator delete(ptr);
+#else
+		operator delete(ptr, std::nothrow);
+#endif
+	}
+	void operator delete(void* ptr, const std::nothrow_t& /*tag*/) noexcept
+	{
+		cudaDeviceSynchronize();
+		cudaFree(ptr);
+	}
+	__host__ __device__ void operator delete(void* /*ptr*/, void* /*place*/)
+	{
+	}
+	void operator delete[](void* ptr, const std::nothrow_t& /*tag*/) noexcept
+	{
+		operator delete(ptr);
+	}
+	__host__ __device__ void operator delete[](void* ptr)
+	{
+#ifdef __CUDA_ARCH__
+		::operator delete[](ptr);
+#else
+		operator delete(ptr);
+#endif
+	}
+	__host__ __device__ void operator delete[](void* /*ptr*/, void* /*place*/)
+	{
+	}
+};
 
-template<typename Derived>
-__global__ void construct_object_kernel(Derived* ptr)
+template<typename T>
+class Unified : public Managed
 {
-	memset(ptr, 0, sizeof(Derived)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
-	new (ptr) Derived;
+public:
+	T t;
+public:
+	Unified() = default;
+	Unified(const Unified&) = default;
+	Unified(Unified&&) = default;
+	Unified(const T& _t): t(_t){}
+	Unified(T&& _t): t(std::move(_t)){}
+	Unified& operator=(const Unified&) = default;
+	Unified& operator=(Unified&&) = default;
+	__host__ __device__ Unified& operator=(const T& _t){t=_t; return *this;}
+	__host__ __device__ Unified& operator=(T&& _t){t=std::move(_t); return *this;}
+	__host__ __device__ T operator->() const {return t;}
+	__host__ __device__ typename std::add_lvalue_reference<typename std::remove_pointer<T>::type>::type operator*() const {return *t;}
+	__host__ __device__ typename std::add_lvalue_reference<typename std::remove_pointer<T>::type>::type operator[](size_t index) const {return t[index];}
+	__host__ __device__ operator T() const {return t;}
+};
+
+template<typename T>
+__global__ void construct_object_kernel(T* ptr)
+{
+	memset(ptr, 0, sizeof(T)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
+	new (ptr) T;
 }
 
-template<typename Derived>
-__global__ void destruct_object_kernel(Derived* ptr)
+template<typename T>
+__global__ void destruct_object_kernel(T* ptr)
 {
-	ptr->~Derived();
+	ptr->~T();
 }
 
-template<typename Derived>
+template<typename T>
 class Resuscitator
 {
 public:
-	Derived* d_derived; // A Derived which is constructed on the device
-	Derived* h_derived; // A Derived which is constructed on the host
-	// Bytemap describing which bytes of Derived belong to vtable and which ones ara part of data
+	T* d_t; // A T which is constructed on the device
+	T* h_t; // A T which is constructed on the host
+	// Bytemap describing which bytes of T belong to vtable and which ones ara part of data
 	// vtable bytes get corrected during resuscitation, data bytes do not get overwritten.
-	bool isPartOfVtable[sizeof(Derived)]={};
+	bool isPartOfVtable[sizeof(T)]={};
 public:
 	Resuscitator()
 	{
-		h_derived = (Derived*)malloc(sizeof(Derived));
-		memset(h_derived, 0, sizeof(Derived)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
-		new (h_derived) Derived;
-		CUDA_CALL(cudaMallocManaged((void **)&d_derived, sizeof(Derived)));
-		construct_object_kernel<Derived><<<1,1>>>(d_derived);
-		cudaDeviceSynchronize();	
-		for (int i=0; i<sizeof(Derived);i++)
+		h_t = (T*)malloc(sizeof(T));
+		memset(h_t, 0, sizeof(T)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
+		new (h_t) T;
+		if (cudaSuccess != cudaMallocManaged((void **)&d_t, sizeof(T)))
+			throw std::bad_alloc();
+		construct_object_kernel<T><<<1,1>>>(d_t);
+		cudaDeviceSynchronize();
+		for (size_t i=0; i<sizeof(T);i++)
 		{
-			isPartOfVtable[i] = ((char*)d_derived)[i] != ((char*)h_derived)[i];
+			isPartOfVtable[i] = ((char*)d_t)[i] != ((char*)h_t)[i];
 		}
 	}
 
-	__host__ __device__ void resuscitate(Derived* object) const
+	__host__ __device__ void resuscitate(T* object) const
 	{
-		for (int i=0; i<sizeof(Derived); i++)
+		for (size_t i=0; i<sizeof(T); i++)
 			if (isPartOfVtable[i])
 			{
 #ifdef __CUDA_ARCH__
-				((char*)object)[i] = ((char*)d_derived)[i];
+				((char*)object)[i] = ((char*)d_t)[i];
 #else
-				((char*)object)[i] = ((char*)h_derived)[i];
+				((char*)object)[i] = ((char*)h_t)[i];
 #endif
 			}
 	}
 
 	~Resuscitator()
 	{
-		h_derived->~Derived();
-		free(h_derived);
-		destruct_object_kernel<<<1, 1>>>(d_derived);
+		h_t->~T();
+		free(h_t);
+		destruct_object_kernel<<<1, 1>>>(d_t);
 		cudaDeviceSynchronize();
-		cudaFree(d_derived);
+		cudaFree(d_t);
 	}
 };
 
-template<typename Derived, bool resuscitateVirtualBases>
-__global__ void resuscitate_kernel(Derived** objects, int len, const Resuscitator<Derived>* rtor)
+template<typename T, bool resuscitateVirtualBases>
+__global__ void resuscitate_kernel(T* objects, int len, const Resuscitator<T>* rtor)
 {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
 	int thread_count = gridDim.x * blockDim.x;
 	for (int i=tid; i<len; i += thread_count)
 	{
 		if (resuscitateVirtualBases)
-			rtor->resuscitate(objects[i]);
+			rtor->resuscitate(&objects[i]);
 		else
 		{
-			Derived s(std::move(*objects[i]));
-			new (objects[i]) Derived(std::move(s));
+			T s(std::move(objects[i]));
+			new (&objects[i]) T(std::move(s));
 		}
 	}
 }
 
-template<typename Base>
-class interplay_movable
-{
-public:
-	virtual size_t getMostDerivedSize() const = 0;
-	virtual const void* createResuscitator() const = 0;
-	virtual void deleteResuscitator(const void* rtor) const = 0;
-	virtual Base* moveTo(void* ptr) = 0;
-	virtual void moveFromDevice(void* ptr, const void* rtor) = 0;
-	virtual void resuscitateOnDevice(void** pos, int len, const void* rtor) = 0;
-	__host__ __device__ virtual ~interplay_movable(){};
-};
-
 // It is amazing how many hoops you have to jump through to emulate "if constexpr" < C++17
-template<typename Derived, bool resuscitateVirtualBases>
+template<typename T, bool resuscitateVirtualBases>
 class CreateResuscitatorImpl;
 
-template<typename Derived>
-class CreateResuscitatorImpl<Derived, false>
+template<typename T>
+class CreateResuscitatorImpl<T, false>
 {
 public:
-	static void* create()
+	static Resuscitator<T>* create()
 	{
 		// We do not need Resuscitator if we do not need to resuscitate virtual bases
 		return NULL;
 	}
 };
 
-template<typename Derived>
-class CreateResuscitatorImpl<Derived, true>
+template<typename T>
+class CreateResuscitatorImpl<T, true>
 {
 public:
-	static void* create()
+	static Resuscitator<T>* create()
 	{
-		Resuscitator<Derived>* rtor;
-		CUDA_CALL(cudaMallocManaged((void **)&rtor, sizeof(Resuscitator<Derived>)));
-		new (rtor) Resuscitator<Derived>;
+		Resuscitator<T>* rtor;
+		if (cudaSuccess != cudaMallocManaged((void **)&rtor, sizeof(Resuscitator<T>)))
+			throw std::bad_alloc();
+		new (rtor) Resuscitator<T>;
 		return rtor;
 	}
 };
 
-template<typename Derived, bool resuscitateVirtualBases>
-class DeleteResuscitatorImpl;
 
-template<typename Derived>
-class DeleteResuscitatorImpl<Derived, false>
-{
-public:
-	static void del(const void* /*rtor*/)
-	{
-		return ;
-	}
-};
-
-template<typename Derived>
-class DeleteResuscitatorImpl<Derived, true>
-{
-public:
-	static void del(const void* rtor)
-	{
-		((Resuscitator<Derived>*)rtor)->~Resuscitator<Derived>();
-		cudaFree((void*)rtor);
-	}
-};
-
-template<typename Base, typename Derived, bool resuscitateVirtualBases=false>
-class implements_interplay_movable : virtual public interplay_movable<Base>
-{
-	using MyResuscitator = Resuscitator<Derived>;
-public:
-	size_t getMostDerivedSize() const override
-	{
-		return sizeof(Derived);
-	}
-	const void* createResuscitator() const override
-	{
-		return CreateResuscitatorImpl<Derived, resuscitateVirtualBases>::create();
-	}
-	void deleteResuscitator(const void* rtor) const override
-	{
-		DeleteResuscitatorImpl<Derived, resuscitateVirtualBases>::del(rtor);
-	}
-	Base* moveTo(void* ptr) override
-	{
-		new (ptr) Derived(std::move(static_cast<Derived&>(*this)));
-		Derived* dp = reinterpret_cast<Derived*>(ptr);
-		return static_cast<Base*>(dp);
-	}
-	// Re-forms the object in the host. Changes the vtable to that of the host.
-	void moveFromDevice(void* ptr, const void* rtor) override
-	{
-		// If we do not need to resuscitate virtual bases, a simple move construction is enough to fix the (single) vtable.
-		if (resuscitateVirtualBases)
-		{
-			((const MyResuscitator*)rtor)->resuscitate((Derived*)ptr); // We need to resuscitate the object because the move constructor will probably access the virtual bases
-		}
-		this->~implements_interplay_movable();
-		new (static_cast<Derived*>(this)) Derived(std::move(*(Derived*)(ptr)));
-	}
-	// Re-forms the object in the device. Changes the vtable to that of the device.
-	void resuscitateOnDevice(void** pos, int len, const void* rtor) override
-	{
-		const int TB_SIZE = 128;
-		const int THREAD_COUNT = 16384;
-		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
-		resuscitate_kernel<Derived, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(reinterpret_cast<Derived**>(pos), len, (const MyResuscitator*)rtor);
-	}
-};
-
-template<typename Base>
+template<typename T, bool resuscitateVirtualBases=false>
 class ClassMigrator
 {
 private:
-	size_t totalSize=0;
-	std::unordered_map<std::type_index, std::pair<const void*, std::vector<std::pair<int, Base*>>>> groups;
-	void** d_objects_derived=NULL;
-	Base** d_objects_base=NULL;
-	char* object_buffer=NULL;
-	static constexpr bool base_final=std::is_final<Base>::value;
+	const int TB_SIZE = 128;
+	const int THREAD_COUNT = 16384;
+
+	Resuscitator<T>* rtor = NULL;
+	T* objs;
+	size_t length;
 public:
 	ClassMigrator() = default;
 	ClassMigrator(const ClassMigrator&) = delete;
 	ClassMigrator(ClassMigrator&& o):
-		totalSize(o.totalSize),
-		groups(std::move(o.groups)),
-		d_objects_derived(o.d_objects_derived),
-		d_objects_base(o.d_objects_base),
-		object_buffer(o.object_buffer)
+		rtor(o.rtor),
+		objs(o.objs),
+		length(o.length)
 	{
-		o.d_objects_derived = NULL;
-		o.object_buffer = NULL;
-		o.d_objects_base=NULL;
+		o.rtor = NULL;
 	}
-	ClassMigrator(const std::vector<Base*>& objs)
+	ClassMigrator(T* _objs, size_t _length):
+		objs(_objs),
+		length(_length)
 	{
-		if (objs.size() == 0)
+		if (length == 0)
 			return ;
 
-		// Calculate the total size required for the unified memory buffer
-		if (base_final)
-			totalSize = sizeof(Base)*objs.size();
-		else
-		{
-			for (const auto& obj : objs)
-				totalSize += obj->getMostDerivedSize();
-		}
-		// Group objects of the same dynamic type together
-		for (int i=0; i<objs.size(); i++)
-		{
-			groups[typeid(*objs[i])].second.push_back(std::make_pair(i, objs[i]));
-		}
-		for (auto& pr : groups)
-			pr.second.first = pr.second.second[0].second->createResuscitator();
-		// Allocate memory to store pointers to the objects
-		CUDA_CALL(cudaMallocManaged((void **)&d_objects_derived, objs.size() * sizeof(void*)));
-		if (base_final == false)
-			CUDA_CALL(cudaMallocManaged((void **)&d_objects_base, objs.size() * sizeof(Base*)));
-		// Allocate memory to store the objects
-		CUDA_CALL(cudaMallocManaged((void **)&object_buffer, totalSize));
+		rtor = CreateResuscitatorImpl<T, resuscitateVirtualBases>::create();
 	}
 
 	~ClassMigrator()
 	{
-		for (auto& pr : groups)
-			pr.second.second[0].second->deleteResuscitator(pr.second.first);
-		cudaFree((void*)d_objects_derived);
-		cudaFree((void*)object_buffer);
-		cudaFree((void*)d_objects_base);
+		if (rtor != NULL)
+		{
+			rtor->~Resuscitator<T>();
+			cudaFree((void*)rtor);
+		}
 	}
 
-	Base** toDevice()
+	void toDevice()
 	{
-		cudaDeviceSynchronize();
-		int d_objects_index = 0;
-		size_t currentSize=0;
-		// Move the objects into unified memory
-		for (const auto& pr : groups)
-		{
-			for (const auto& obj : pr.second.second)
-			{
-				void* derived_ptr = &object_buffer[currentSize];
-				Base* base_ptr = dynamic_cast<Base*>(obj.second->moveTo(derived_ptr)); // TODO: We're already paying for a virtual function call, can we get rid of the dynamic_cast?
-				d_objects_derived[d_objects_index++] = derived_ptr;
-				if (base_final == false)
-				{
-					currentSize += obj.second->getMostDerivedSize();
-					d_objects_base[obj.first] = base_ptr;
-				}
-				else
-					currentSize += sizeof(Base);
-			}
-		}
-		// Resuscitate the objects, one group at a time.
+		// Resuscitate the objects.
 		// Resuscitation lets the device use the virtual functions and access the virtual bases of objects created on the host and vica versa.
 		// We actually have a dedicated kernel for each dynamic type, which is what interface_movable::resuscitateOnDevice ends up running.
 		// This keeps us from having to maintain RTTI manually. It also reduces branch divergence on the device.
-		d_objects_index = 0;
-		for (const auto& pr : groups)
-		{
-			pr.second.second[0].second->resuscitateOnDevice(&d_objects_derived[d_objects_index], pr.second.second.size(), pr.second.first);
-			d_objects_index += pr.second.second.size();
-		}
-
-		cudaDeviceSynchronize();
-
-		if (base_final == false)
-			return d_objects_base;
-		else
-			return (Base**)d_objects_derived;
+		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
+		resuscitate_kernel<T, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(objs, length, rtor);
 	}
 
 	void toHost() // Careful: overwrites the given objects
 	{
 		cudaDeviceSynchronize();
-		// Copy the objects back to the host
-		int d_objects_index = 0;
-		for (const auto& pr : groups)
+		// Re-construct the objects on the host
+		for (size_t i=0; i<length; i++)
 		{
-			const void* rtor = pr.second.first;
-			for (const auto& obj : pr.second.second)
+			if (resuscitateVirtualBases)
 			{
-				obj.second->moveFromDevice(d_objects_derived[d_objects_index++], rtor);
+				rtor->resuscitate(&objs[i]); // We need to resuscitate the object because the move constructor will probably access the virtual bases and crash
+			}
+			else // If we do not need to resuscitate virtual bases, a simple move construction is enough to fix the (single) vtable.
+			{
+				T temp{std::move(objs[i])};
+				// We cannot call the destructor of objs[i] here, because it is most likely virtual thus the call will crash.
+				new (&objs[i]) T(std::move(temp));
 			}
 		}
 	}
