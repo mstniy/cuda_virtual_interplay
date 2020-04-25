@@ -19,8 +19,6 @@ public:
 public:
 	Base() = default;
 	__host__ __device__ Base(int _b_id):b_id(_b_id){}
-	__host__ __device__ Base(const Base& b):b_id(b.b_id){}
-	__host__ __device__ Base(Base&& b):b_id(b.b_id){}
 	virtual ~Base() = default;
 	__device__ virtual void f() = 0;
 	__host__ __device__ virtual void g() = 0;
@@ -34,8 +32,6 @@ public:
 public:
 	Sub1() = default;
 	__host__ __device__ Sub1(int _b_id, int _sub_id):Base(_b_id), sub_id(_sub_id){}
-	__host__ __device__ Sub1(const Sub1& s):Base(s), sub_id(s.sub_id){}
-	__device__ __host__ Sub1(Sub1&& s):Base(std::move(s)), sub_id(s.sub_id){}
 	__device__ void f() override
 	{
 		printf("Sub1::f %d %d!\n", b_id, sub_id);
@@ -56,7 +52,7 @@ public:
 	Sub2() = delete; // non-default constructible classes are also supported
 	__host__ __device__ Sub2(int _b_id, char _sub_ch):Base(_b_id), sub_ch(_sub_ch){}
 	Sub2(const Sub2&) = delete; // non-copy constructible classes are also supported
-	__device__ __host__ Sub2(Sub2&& s):Base(std::move(s)), sub_ch(s.sub_ch){}
+	Sub2(Sub2&& s) = default;
 	__device__ void f() override
 	{
 		printf("Sub2::f %d %c!\n", b_id, sub_ch);
