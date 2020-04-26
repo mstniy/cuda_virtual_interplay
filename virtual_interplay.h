@@ -256,6 +256,7 @@ public:
 		// This keeps us from having to maintain RTTI manually. It also reduces branch divergence on the device.
 		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
 		resuscitate_kernel<T, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(objs, length, rtor);
+		cudaDeviceSynchronize();
 	}
 
 	void toHost() // Careful: overwrites the given objects
