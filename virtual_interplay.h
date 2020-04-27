@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <type_traits>
 #include <new>
+#include "cuda_memory"
 
 template<typename T>
 __global__ void construct_object_kernel(T* ptr)
@@ -91,10 +92,10 @@ template<typename T>
 class CreateResuscitatorImpl<T, false>
 {
 public:
-	static Resuscitator<T>* create()
+	static unified_unique_ptr<Resuscitator<T>> create()
 	{
 		// We do not need Resuscitator if we do not need to resuscitate virtual bases
-		return NULL;
+		return {};
 	}
 };
 
@@ -102,13 +103,9 @@ template<typename T>
 class CreateResuscitatorImpl<T, true>
 {
 public:
-	static Resuscitator<T>* create()
+	static unified_unique_ptr<Resuscitator<T>> create()
 	{
-		Resuscitator<T>* rtor;
-		if (cudaSuccess != cudaMallocManaged((void **)&rtor, sizeof(Resuscitator<T>)))
-			throw std::bad_alloc();
-		new (rtor) Resuscitator<T>;
-		return rtor;
+		return make_unified_unique<Resuscitator<T>>();
 	}
 };
 
@@ -120,7 +117,7 @@ private:
 	const int TB_SIZE = 128;
 	const int THREAD_COUNT = 16384;
 
-	Resuscitator<T>* rtor = NULL;
+	unified_unique_ptr<Resuscitator<T>> rtor;
 	T* objs;
 	size_t length;
 public:
@@ -143,15 +140,6 @@ public:
 		rtor = CreateResuscitatorImpl<T, resuscitateVirtualBases>::create();
 	}
 
-	~ClassMigrator()
-	{
-		if (rtor != NULL)
-		{
-			rtor->~Resuscitator<T>();
-			cudaFree((void*)rtor);
-		}
-	}
-
 	void toDevice()
 	{
 		// Resuscitate the objects.
@@ -159,7 +147,7 @@ public:
 		// We actually have a dedicated kernel for each dynamic type, which is what interface_movable::resuscitateOnDevice ends up running.
 		// This keeps us from having to maintain RTTI manually. It also reduces branch divergence on the device.
 		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
-		resuscitate_kernel<T, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(objs, length, rtor);
+		resuscitate_kernel<T, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(objs, length, rtor.get());
 		cudaDeviceSynchronize();
 	}
 
