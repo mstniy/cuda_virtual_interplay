@@ -1,0 +1,144 @@
+#ifndef CUDA_MEMORY_H
+#define CUDA_MEMORY_H
+
+#include <new>
+
+template<typename _T>
+class unified_unique_ptr
+{
+	typedef typename std::remove_extent<_T>::type T;
+private:
+	T* p=NULL;
+public:
+	unified_unique_ptr() = default;
+
+	unified_unique_ptr(nullptr_t)
+	{
+	}
+
+	explicit unified_unique_ptr(T* _p):
+		p(_p)
+	{
+	}
+
+	unified_unique_ptr(const unified_unique_ptr&) = delete;
+
+	__host__ __device__ unified_unique_ptr(unified_unique_ptr&& o):
+		p(o.p)
+	{
+		o.p = NULL;
+	}
+
+	~unified_unique_ptr()
+	{
+		cudaFree(p);
+	}
+
+	unified_unique_ptr& operator=(const unified_unique_ptr&) = delete;
+	unified_unique_ptr& operator=(unified_unique_ptr&& o)
+	{
+		if (&o == this)
+			return (*this);
+		cudaFree(p);
+		p = o.p;
+		o.p = nullptr;
+		return *(this);
+	}
+	unified_unique_ptr& operator=(nullptr_t)
+	{
+		cudaFree(p);
+		p = NULL;
+		return (*this);
+	}
+	T* release()
+	{
+		T* res = p;
+		p = NULL;
+		return res;
+	}
+	void reset()
+	{
+		cudaFree(p);
+		p = NULL;
+	}
+	void reset(T* _p)
+	{
+		reset();
+		p = _p;
+	}
+	__host__ __device__ T* get() const
+	{
+		return p;
+	}
+	__host__ __device__ T& operator*() const
+	{
+		return *p;
+	}
+	__host__ __device__ T* operator->() const
+	{
+		return p;
+	}
+	__host__ __device__ T& operator[](int64_t index)
+	{
+		return p[index];
+	}
+	__host__ __device__ explicit operator bool() const
+	{
+		return p != NULL;
+	}
+};
+
+template<class T> struct _Unified_Unique_if {
+	typedef unified_unique_ptr<T> _Single_object;
+};
+
+template<class T> struct _Unified_Unique_if<T[]> {
+	typedef unified_unique_ptr<T[]> _Unknown_bound;
+};
+
+template<class T, size_t N> struct _Unified_Unique_if<T[N]> {
+	typedef void _Known_bound;
+};
+
+template<class T, class... Args>
+typename _Unified_Unique_if<T>::_Single_object make_unified_unique(Args&&... args)
+{
+	T* ptr;
+	if (cudaSuccess != cudaMallocManaged((void **)&ptr, sizeof(T)))
+		throw std::bad_alloc();
+	try
+	{
+		new (ptr) T(std::forward<Args>(args)...);
+	}
+	catch (...)
+	{
+		cudaFree(ptr);
+		throw;
+	}
+	return unified_unique_ptr<T>(ptr);
+}
+
+template<class T>
+typename _Unified_Unique_if<T>::_Unknown_bound make_unified_unique(size_t n)
+{
+	typedef typename std::remove_extent<T>::type U;
+	U* ptr;
+	if (cudaSuccess != cudaMallocManaged((void **)&ptr, sizeof(U)*n))
+		throw std::bad_alloc();
+	try
+	{
+		for (size_t i=0; i<n; i++)
+			new (&ptr[i]) U;
+	}
+	catch (...)
+	{
+		cudaFree(ptr);
+		throw;
+	}
+	return unified_unique_ptr<U[]>(ptr);
+}
+
+template<class T, class... Args>
+typename _Unified_Unique_if<T>::_Known_bound make_unified_unique(Args&&...) = delete;
+
+#endif

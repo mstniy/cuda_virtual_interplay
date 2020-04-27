@@ -3,6 +3,7 @@
 #include <memory>
 #include <iostream>
 #include "virtual_interplay.h"
+#include "cuda_memory"
 
 #ifndef CUDA_CALL
 #define CUDA_CALL(x) do { if((x) != cudaSuccess) { \
@@ -12,7 +13,7 @@
 
 using namespace std;
 
-class Base : public Managed
+class Base
 {
 public:
 	int b_id;
@@ -65,7 +66,7 @@ public:
 	}
 };
 
-__global__ void runner(Unified<Base*>* objects, int len)
+__global__ void runner(Base* objects[], int len)
 {
 	for (int i=0; i<len; i++)
 	{
@@ -75,11 +76,11 @@ __global__ void runner(Unified<Base*>* objects, int len)
 
 int main()
 {
-	unique_ptr<Sub1> s1(new Sub1(1, 2));
-	unique_ptr<Sub2> s2(new Sub2(3, 'd'));
+	auto s1 = make_unified_unique<Sub1>(1, 2);
+	auto s2 = make_unified_unique<Sub2>(3, 'd');
 	ClassMigrator<Sub1, true> sub1_migrator(s1.get(), 1);
 	ClassMigrator<Sub2> sub2_migrator(s2.get(), 1);
-	unique_ptr<Unified<Base*>[]> objs(new Unified<Base*>[2]);
+	auto objs = make_unified_unique<Base*[]>(2);
 	objs[0] = s1.get();
 	objs[1] = s2.get();
 	// Migrate the objects to the device
