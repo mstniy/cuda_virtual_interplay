@@ -9,7 +9,6 @@
 template<typename T>
 __global__ void construct_object_kernel(T* ptr)
 {
-	memset(ptr, 0, sizeof(T)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
 	new (ptr) T;
 }
 
@@ -20,27 +19,27 @@ __global__ void destruct_object_kernel(T* ptr)
 }
 
 template<typename T>
+struct my_aligned_storage {
+	alignas(T) unsigned char data[sizeof(T)];
+};
+
+template<typename T>
 class Resuscitator
 {
 public:
-	T* d_t; // A T which is constructed on the device
-	T* h_t; // A T which is constructed on the host
+	my_aligned_storage<T> d_t_buffer={0}, h_t_buffer={0}; // A pair of T-s, one is constructed on the device, the other on the host. Initialized with zeros in case the constructor leaves some data fields uninitialized.
 	// Bytemap describing which bytes of T belong to vtable and which ones ara part of data
 	// vtable bytes get corrected during resuscitation, data bytes do not get overwritten.
-	bool isPartOfVtable[sizeof(T)]={};
+	bool isPartOfVtable[sizeof(T)]={0};
 public:
 	Resuscitator()
 	{
-		h_t = (T*)malloc(sizeof(T));
-		memset(h_t, 0, sizeof(T)); // Initialize all bytes to 0 in case the constructor leaves some data fields uninitialized
-		new (h_t) T;
-		if (cudaSuccess != cudaMallocManaged((void **)&d_t, sizeof(T)))
-			throw std::bad_alloc();
-		construct_object_kernel<T><<<1,1>>>(d_t);
+		new (&h_t_buffer) T;
+		construct_object_kernel<T><<<1,1>>>((T*)&d_t_buffer); // This is fine because Resuscitator is always created in unified memory
 		cudaDeviceSynchronize();
 		for (size_t i=0; i<sizeof(T);i++)
 		{
-			isPartOfVtable[i] = ((char*)d_t)[i] != ((char*)h_t)[i];
+			isPartOfVtable[i] = d_t_buffer.data[i] != h_t_buffer.data[i];
 		}
 	}
 
@@ -50,20 +49,18 @@ public:
 			if (isPartOfVtable[i])
 			{
 #ifdef __CUDA_ARCH__
-				((char*)object)[i] = ((char*)d_t)[i];
+				((char*)object)[i] = d_t_buffer.data[i];
 #else
-				((char*)object)[i] = ((char*)h_t)[i];
+				((char*)object)[i] = h_t_buffer.data[i];
 #endif
 			}
 	}
 
 	~Resuscitator()
 	{
-		h_t->~T();
-		free(h_t);
-		destruct_object_kernel<<<1, 1>>>(d_t);
+		((T*)&h_t_buffer)->~T();
+		destruct_object_kernel<<<1, 1>>>((T*)&d_t_buffer);
 		cudaDeviceSynchronize();
-		cudaFree(d_t);
 	}
 };
 
