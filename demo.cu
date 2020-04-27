@@ -78,20 +78,20 @@ int main()
 {
 	auto s1 = make_unified_unique<Sub1>(1, 2);
 	auto s2 = make_unified_unique<Sub2>(3, 'd');
-	ClassMigrator<Sub1, true> sub1_migrator(s1.get(), 1);
-	ClassMigrator<Sub2> sub2_migrator(s2.get(), 1);
+
 	auto objs = make_unified_unique<Base*[]>(2);
 	objs[0] = s1.get();
 	objs[1] = s2.get();
+
 	// Migrate the objects to the device
-	sub1_migrator.toDevice();
-	sub2_migrator.toDevice();
-	cudaDeviceSynchronize();
+	ClassMigrator<Sub1> sub1_migrator;
+	sub1_migrator.toDeviceWithVirtualBases(s1.get(), 1);
+	ClassMigrator<Sub2>::toDevice(s2.get(), 1);
 	// Run the demo to make sure everything works.
 	runner<<<1,1>>>(objs.get(), 2);
 	// Migrate the objects back to the host
-	sub1_migrator.toHost();
-	sub2_migrator.toHost();
+	sub1_migrator.toHostWithVirtualBases(s1.get(), 1);
+	ClassMigrator<Sub2>::toHost(s2.get(), 1);
 	// Another demo to make sure that the changes come back to the host
 	objs[0]->g();
 	objs[1]->g();

@@ -81,90 +81,53 @@ __global__ void resuscitate_kernel(T* objects, int len, const Resuscitator<T>* r
 	}
 }
 
-// It is amazing how many hoops you have to jump through to emulate "if constexpr" < C++17
-template<typename T, bool resuscitateVirtualBases>
-class CreateResuscitatorImpl;
-
 template<typename T>
-class CreateResuscitatorImpl<T, false>
-{
-public:
-	static unified_unique_ptr<Resuscitator<T>> create()
-	{
-		// We do not need Resuscitator if we do not need to resuscitate virtual bases
-		return {};
-	}
-};
-
-template<typename T>
-class CreateResuscitatorImpl<T, true>
-{
-public:
-	static unified_unique_ptr<Resuscitator<T>> create()
-	{
-		return make_unified_unique<Resuscitator<T>>();
-	}
-};
-
-
-template<typename T, bool resuscitateVirtualBases=false>
 class ClassMigrator
 {
 private:
-	const int TB_SIZE = 128;
-	const int THREAD_COUNT = 16384;
+	static const int TB_SIZE = 128;
+	static const int THREAD_COUNT = 16384;
+	static const int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
 
 	unified_unique_ptr<Resuscitator<T>> rtor;
-	T* objs;
-	size_t length;
 public:
-	ClassMigrator() = default;
-	ClassMigrator(const ClassMigrator&) = delete;
-	ClassMigrator(ClassMigrator&& o):
-		rtor(o.rtor),
-		objs(o.objs),
-		length(o.length)
+	// Migrate the given objects to the device.
+	// Migration lets the device use the virtual functions of objects created on the host and vica versa.
+	static void toDevice(T* objs, size_t length)
 	{
-		o.rtor = NULL;
-	}
-	ClassMigrator(T* _objs, size_t _length):
-		objs(_objs),
-		length(_length)
-	{
-		if (length == 0)
-			return ;
-
-		rtor = CreateResuscitatorImpl<T, resuscitateVirtualBases>::create();
-	}
-
-	void toDevice()
-	{
-		// Resuscitate the objects.
-		// Resuscitation lets the device use the virtual functions and access the virtual bases of objects created on the host and vica versa.
-		// We actually have a dedicated kernel for each dynamic type, which is what interface_movable::resuscitateOnDevice ends up running.
-		// This keeps us from having to maintain RTTI manually. It also reduces branch divergence on the device.
-		int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
-		resuscitate_kernel<T, resuscitateVirtualBases><<<grid_size, TB_SIZE>>>(objs, length, rtor.get());
+		resuscitate_kernel<T, false><<<grid_size, TB_SIZE>>>(objs, length, NULL);
 		cudaDeviceSynchronize();
 	}
 
-	void toHost() // Careful: overwrites the given objects
+	// Migrate the objects with their virtual bases.
+	void toDeviceWithVirtualBases(T* objs, size_t length)
+	{
+		if (rtor == NULL)
+			rtor = make_unified_unique<Resuscitator<T>>();
+		resuscitate_kernel<T, true><<<grid_size, TB_SIZE>>>(objs, length, rtor.get());
+		cudaDeviceSynchronize();
+	}
+
+	// Migrate the given objects to the host.
+	static void toHost(T* objs, size_t length)
 	{
 		cudaDeviceSynchronize();
-		// Re-construct the objects on the host
 		for (size_t i=0; i<length; i++)
 		{
-			if (resuscitateVirtualBases)
-			{
-				rtor->resuscitate(&objs[i]); // We need to resuscitate the object because the move constructor will probably access the virtual bases and crash
-			}
-			else // If we do not need to resuscitate virtual bases, a simple move construction is enough to fix the (single) vtable.
-			{
-				T temp{std::move(objs[i])};
-				// We cannot call the destructor of objs[i] here, because it is most likely virtual thus the call will crash.
-				new (&objs[i]) T(std::move(temp));
-			}
+			// If we do not need to resuscitate virtual bases, a simple move construction is enough to fix the (single) vtable.
+			T temp{std::move(objs[i])};
+			// We cannot call the destructor of objs[i] here, because it is most likely virtual thus the call will crash.
+			new (&objs[i]) T(std::move(temp));
 		}
+	}
+
+	void toHostWithVirtualBases(T* objs, size_t length)
+	{
+		cudaDeviceSynchronize();
+		if (rtor == NULL)
+			rtor = make_unified_unique<Resuscitator<T>>();
+		for (size_t i=0; i<length; i++)
+			rtor->resuscitate(&objs[i]); // We cannot use the move constructor because it will probably access the virtual bases and crash
 	}
 };
 

@@ -88,6 +88,25 @@ public:
 	}
 };
 
+template<class T1, class T2> bool operator==(const unified_unique_ptr<T1>& x, const unified_unique_ptr<T2>& y){return x.get() == y.get();}
+template<class T1, class T2> bool operator!=(const unified_unique_ptr<T1>& x, const unified_unique_ptr<T2>& y){return x.get() != y.get();}
+template<class T1, class T2> bool operator< (const unified_unique_ptr<T1>& x, const unified_unique_ptr<T2>& y){return x.get() < y.get(); }
+template<class T1, class T2> bool operator<=(const unified_unique_ptr<T1>& x, const unified_unique_ptr<T2>& y){return x.get() <= y.get();}
+template<class T1, class T2> bool operator> (const unified_unique_ptr<T1>& x, const unified_unique_ptr<T2>& y){return x.get() > y.get(); }
+template<class T1, class T2> bool operator>=(const unified_unique_ptr<T1>& x, const unified_unique_ptr<T2>& y){return x.get() >= y.get();}
+template <class T>           bool operator==(const unified_unique_ptr<T>& x, std::nullptr_t) noexcept         {return x.get() == nullptr;}
+template <class T>           bool operator==(std::nullptr_t, const unified_unique_ptr<T>& x) noexcept         {return x.get() == nullptr;}
+template <class T>           bool operator!=(const unified_unique_ptr<T>& x, std::nullptr_t) noexcept         {return x.get() != nullptr;}
+template <class T>           bool operator!=(std::nullptr_t, const unified_unique_ptr<T>& x) noexcept         {return x.get() != nullptr;}
+template <class T>           bool operator< (const unified_unique_ptr<T>& x, std::nullptr_t)                  {return x.get() < nullptr; }
+template <class T>           bool operator< (std::nullptr_t, const unified_unique_ptr<T>& x)                  {return nullptr < x.get(); }
+template <class T>           bool operator<=(const unified_unique_ptr<T>& x, std::nullptr_t)                  {return x.get() <= nullptr;}
+template <class T>           bool operator<=(std::nullptr_t, const unified_unique_ptr<T>& x)                  {return nullptr <= x.get();}
+template <class T>           bool operator> (const unified_unique_ptr<T>& x, std::nullptr_t)                  {return x.get() > nullptr; }
+template <class T>           bool operator> (std::nullptr_t, const unified_unique_ptr<T>& x)                  {return nullptr > x.get(); }
+template <class T>           bool operator>=(const unified_unique_ptr<T>& x, std::nullptr_t)                  {return x.get() >= nullptr;}
+template <class T>           bool operator>=(std::nullptr_t, const unified_unique_ptr<T>& x)                  {return nullptr >= x.get();}
+
 template<class T> struct _Unified_Unique_if {
 	typedef unified_unique_ptr<T> _Single_object;
 };

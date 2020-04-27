@@ -47,16 +47,15 @@ Another disadvantage to migrating virtual bases is that it is slower, since it n
 
 `#include "virtual_interplay.h"` to access the library.  
 **Objects to be migrated must be allocated on unified memory.** This can be achieved by using `unified_unique_ptr` or `make_unified_unique`.
-If you need to access virtual bases across CUDA boundaries, set `resuscitateVirtualBases=true`.  
 Use `__host__ __device__` to make sure your move (and default, if you want to migrate virtual bases) constructor is callable from both the host and the device, if they are not implicit or defaulted.  
 Mark the virtual functions with `__device__` to let them be used from the device, or with `__host__ __device__` to let them be used on both sides.  
 
 To migrate an array of objects to the device, do:
 
-    ClassMigrator<Type> migrator(objs, num_objs);
-    migrator.toDevice();
+    ClassMigrator<Type>::toDevice(objs, num_objs);
 
+To migrate them back to the host, use `toHost()`
 
-To migrate them back to the host, use `migrator.toHost()`
+If you need to access virtual bases across CUDA boundaries, use `toDeviceWithVirtualBases` and `toHostWithVirtualBases`.  
 
 For a complete example, see `demo.cu`.
