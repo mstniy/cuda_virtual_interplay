@@ -86,8 +86,7 @@ class ClassMigrator
 {
 private:
 	static const int TB_SIZE = 128;
-	static const int THREAD_COUNT = 16384;
-	static const int grid_size = (THREAD_COUNT+TB_SIZE-1)/TB_SIZE;
+	static const size_t MAX_THREAD_COUNT = 16384;
 
 	unified_unique_ptr<Resuscitator<T>> rtor;
 public:
@@ -95,6 +94,8 @@ public:
 	// Migration lets the device use the virtual functions of objects created on the host and vica versa.
 	static void toDevice(T* objs, size_t length)
 	{
+		int thread_count = std::min(MAX_THREAD_COUNT, length);
+		int grid_size = (thread_count+TB_SIZE-1)/TB_SIZE;
 		resuscitate_kernel<T, false><<<grid_size, TB_SIZE>>>(objs, length, NULL);
 		cudaDeviceSynchronize();
 	}
@@ -104,6 +105,8 @@ public:
 	{
 		if (rtor == NULL)
 			rtor = make_unified_unique<Resuscitator<T>>();
+		int thread_count = std::min(MAX_THREAD_COUNT, length);
+		int grid_size = (thread_count+TB_SIZE-1)/TB_SIZE;
 		resuscitate_kernel<T, true><<<grid_size, TB_SIZE>>>(objs, length, rtor.get());
 		cudaDeviceSynchronize();
 	}
