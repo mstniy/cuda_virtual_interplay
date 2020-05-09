@@ -5,7 +5,7 @@
 #include <memory>
 
 template<typename T>
-class FreeUnifiedMemory
+class _FreeCUDAMemory
 {
 public:
 	void operator()(T* t)
@@ -14,20 +14,16 @@ public:
 	}
 };
 
+
+// ----------------------------------------------------------------------------
+
+
 template<typename T>
-using unified_unique_ptr = std::unique_ptr<T, FreeUnifiedMemory<typename std::remove_extent<T>::type>>;
+using unified_unique_ptr = std::unique_ptr<T, _FreeCUDAMemory<typename std::remove_extent<T>::type>>;
 
-template<class T> struct _Unified_Unique_if {
-	typedef unified_unique_ptr<T> _Single_object;
-};
-
-template<class T> struct _Unified_Unique_if<T[]> {
-	typedef unified_unique_ptr<T[]> _Unknown_bound;
-};
-
-template<class T, size_t N> struct _Unified_Unique_if<T[N]> {
-	typedef void _Known_bound;
-};
+template<class T> struct _Unified_Unique_if {typedef unified_unique_ptr<T> _Single_object;};
+template<class T> struct _Unified_Unique_if<T[]> {typedef unified_unique_ptr<T[]> _Unknown_bound;};
+template<class T, size_t N> struct _Unified_Unique_if<T[N]> {typedef void _Known_bound;};
 
 template<class T, class... Args>
 typename _Unified_Unique_if<T>::_Single_object make_unified_unique(Args&&... args)
@@ -69,5 +65,56 @@ typename _Unified_Unique_if<T>::_Unknown_bound make_unified_unique(size_t n)
 
 template<class T, class... Args>
 typename _Unified_Unique_if<T>::_Known_bound make_unified_unique(Args&&...) = delete;
+
+
+// ----------------------------------------------------------------------------
+
+template<typename T>
+using device_unique_ptr = std::unique_ptr<T, _FreeCUDAMemory<typename std::remove_extent<T>::type>>;
+
+template<class T> struct _Device_Unique_if {typedef device_unique_ptr<T> _Single_object;};
+template<class T> struct _Device_Unique_if<T[]> {typedef device_unique_ptr<T[]> _Unknown_bound;};
+template<class T, size_t N> struct _Device_Unique_if<T[N]> {typedef void _Known_bound;};
+
+template<class T, class... Args>
+typename _Device_Unique_if<T>::_Single_object make_device_unique(Args&&... args)
+{
+	T* ptr;
+	if (cudaSuccess != cudaMalloc((void **)&ptr, sizeof(T)))
+		throw std::bad_alloc();
+	try
+	{
+		new (ptr) T(std::forward<Args>(args)...);
+	}
+	catch (...)
+	{
+		cudaFree(ptr);
+		throw;
+	}
+	return device_unique_ptr<T>(ptr);
+}
+
+template<class T>
+typename _Device_Unique_if<T>::_Unknown_bound make_device_unique(size_t n)
+{
+	typedef typename std::remove_extent<T>::type U;
+	U* ptr;
+	if (cudaSuccess != cudaMalloc((void **)&ptr, sizeof(U)*n))
+		throw std::bad_alloc();
+	try
+	{
+		for (size_t i=0; i<n; i++)
+			new (&ptr[i]) U;
+	}
+	catch (...)
+	{
+		cudaFree(ptr);
+		throw;
+	}
+	return device_unique_ptr<U[]>(ptr);
+}
+
+template<class T, class... Args>
+typename _Device_Unique_if<T>::_Known_bound make_device_unique(Args&&...) = delete;
 
 #endif
